@@ -94,7 +94,9 @@ What it sets on each upload:
 **One-time setup per device (about 5 minutes):**
 1. In [Google Cloud Console](https://console.cloud.google.com/), create a project (any name, for example "clipper").
 2. Go to **APIs & Services → Library**, find **YouTube Data API v3**, and click **Enable**.
-3. Go to **APIs & Services → OAuth consent screen** and choose **External**. Fill in the app name and your email, add yourself under **Test users**, then set **Publishing status** to **In production**. In Testing mode Google expires the sign-in every 7 days. You'll see an "unverified app" warning when you sign in; that's expected for your own app.
+3. Go to **APIs & Services → OAuth consent screen** (now called **Google Auth Platform**) and choose **External**.
+   - **Branding:** app name, your support email, the homepage `https://github.com/aritam11/clipping` and the privacy policy `https://github.com/aritam11/clipping/blob/main/PRIVACY.md`. If it asks for **Authorized domains**, add `github.com`.
+   - **Audience → Publish app → Confirm**, so the publishing status says **In production**. In Testing mode Google expires the sign-in every 7 days. You'll see an "unverified app" warning when you sign in (**Advanced → Go to … (unsafe)**); that's expected for your own app and needs no verification.
 4. Go to **APIs & Services → Credentials → Create credentials → OAuth client ID**, choose **Desktop app**, and click **Download JSON**. Save the file as `credentials/client_secret.json` in this folder. `credentials/` is git-ignored, so it's never uploaded to GitHub.
 5. Run `uv run clip youtube auth`. Your browser opens; sign in with the Google account that owns the channel (pick the brand channel if you have several) and allow access. Check it worked with `uv run clip youtube status`.
 
