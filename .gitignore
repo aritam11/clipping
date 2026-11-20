@@ -1,0 +1,14 @@
+# environment
+.venv/
+__pycache__/
+*.pyc
+
+# generated media, state and logs (big, per-machine, and contain other people's footage)
+work/
+output/
+samples/
+
+# OS / editor
+.DS_Store
+*.tmp
+.claude/settings.local.json

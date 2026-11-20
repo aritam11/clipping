@@ -1,0 +1,11 @@
+# One source per line. Copy this file to sources.txt and edit it.
+# Each new video is clipped once. Progress is kept in work/state.json.
+#
+# YouTube channel (checks the latest uploads):
+# https://www.youtube.com/@SomeCreator/videos
+#
+# Twitch past broadcasts (VODs):
+# https://www.twitch.tv/somestreamer/videos?filter=archives
+#
+# A local folder, e.g. where OBS saves your recordings:
+# ~/Movies/OBS

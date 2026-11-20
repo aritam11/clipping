@@ -1,0 +1,581 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Clipper Dashboard</title>
+<style>
+:root {
+  color-scheme: light;
+  --page: #f9f9f7; --surface: #fcfcfb; --raised: #ffffff;
+  --text: #0b0b0b; --text-2: #52514e; --muted: #898781;
+  --grid: #e1e0d9; --axis: #c3c2b7; --border: rgba(11,11,11,0.10);
+  --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a;
+  --good: #0ca30c; --warning: #fab219; --serious: #ec835a; --critical: #d03b3b; --good-text: #006300;
+  --band: rgba(11,11,11,0.07); --on-fill: #ffffff;
+}
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) {
+    color-scheme: dark;
+    --page: #0d0d0d; --surface: #1a1a19; --raised: #222220;
+    --text: #f0efec; --text-2: #c3c2b7; --muted: #898781;
+    --grid: #2c2c2a; --axis: #383835; --border: rgba(255,255,255,0.10);
+    --s1: #3987e5; --s2: #d95926; --s3: #199e70; --good-text: #0ca30c;
+    --band: rgba(255,255,255,0.08);
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #0d0d0d; --surface: #1a1a19; --raised: #222220;
+  --text: #f0efec; --text-2: #c3c2b7; --muted: #898781;
+  --grid: #2c2c2a; --axis: #383835; --border: rgba(255,255,255,0.10);
+  --s1: #3987e5; --s2: #d95926; --s3: #199e70; --good-text: #0ca30c;
+  --band: rgba(255,255,255,0.08);
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--page); color: var(--text);
+  font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, system-ui, sans-serif; }
+.wrap { max-width: 1280px; margin: 0 auto; padding: 20px 16px 48px; }
+header { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; margin-bottom: 18px; }
+h1 { font-size: 18px; margin: 0; letter-spacing: -0.01em; }
+h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-2); margin: 28px 0 10px; font-weight: 600; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; flex: 1; }
+.chip { background: var(--surface); border: 1px solid var(--border); border-radius: 999px; padding: 4px 10px; color: var(--text-2); font-size: 12.5px; white-space: nowrap; }
+.chip b { color: var(--text); font-weight: 600; }
+.updated { color: var(--muted); font-size: 12px; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+@media (max-width: 860px) { .grid2 { grid-template-columns: 1fr; } }
+.muted { color: var(--muted); } .t2 { color: var(--text-2); }
+.row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.spacer { flex: 1; }
+.pill { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; padding: 2px 9px 2px 7px; border-radius: 999px; border: 1px solid var(--border); background: var(--raised); color: var(--text); white-space: nowrap; }
+.pill i { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.banner { background: var(--surface); border: 1px solid var(--critical); border-radius: 10px; padding: 10px 14px; margin-bottom: 14px; display: none; }
+/* agents */
+.agents { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; }
+.agent .url { font-weight: 600; word-break: break-all; }
+.agent pre { margin: 8px 0 0; font: 11.5px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--text-2); white-space: pre-wrap; word-break: break-word; max-height: 86px; overflow: hidden; }
+/* live */
+.live-head h3 { margin: 0; font-size: 17px; }
+.stats { display: flex; flex-wrap: wrap; gap: 8px 22px; margin-top: 10px; }
+.stat .v { font-size: 20px; font-weight: 650; font-variant-numeric: tabular-nums; }
+.stat .k { font-size: 12px; color: var(--muted); }
+.flow { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; margin: 16px 0 6px; }
+@media (max-width: 980px) { .flow { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 560px) { .flow { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.stage { position: relative; background: var(--raised); border: 1px solid var(--border); border-radius: 10px; padding: 9px 11px 10px; min-height: 84px; }
+.stage .n { font-weight: 650; font-size: 13px; display: flex; align-items: center; gap: 7px; }
+.stage .d { font-size: 12px; color: var(--text-2); margin-top: 3px; overflow-wrap: anywhere; }
+.stage .a { font-size: 11.5px; color: var(--muted); margin-top: 4px; font-variant-numeric: tabular-nums; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--axis); flex: none; }
+.dot.on { background: var(--good); box-shadow: 0 0 0 0 color-mix(in srgb, var(--good) 60%, transparent); animation: pulse 1.6s ease-out infinite; }
+@keyframes pulse { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--good) 55%, transparent); } 100% { box-shadow: 0 0 0 7px transparent; } }
+@media (prefers-reduced-motion: reduce) { .dot.on { animation: none; } }
+.stage .arrow { position: absolute; right: -8px; top: 50%; width: 8px; height: 1px; background: var(--axis); }
+/* chart */
+.chart-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 16px; margin: 14px 0 4px; }
+.chart-head .title { font-weight: 650; }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: var(--text-2); }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.key-line { width: 16px; height: 2px; border-radius: 1px; display: inline-block; }
+.key-box { width: 12px; height: 8px; border-radius: 2px; display: inline-block; }
+.chart { position: relative; width: 100%; }
+.chart svg { display: block; width: 100%; overflow: visible; }
+.chart text { font-size: 11px; fill: var(--muted); font-variant-numeric: tabular-nums; }
+.chart .lane-label { fill: var(--text-2); }
+.tip { position: absolute; pointer-events: none; background: var(--raised); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; font-size: 12px; box-shadow: 0 4px 16px rgba(0,0,0,0.12); max-width: 300px; display: none; z-index: 5; }
+.tip .tt { color: var(--muted); margin-bottom: 4px; font-variant-numeric: tabular-nums; }
+.tip .tr { display: flex; align-items: center; gap: 8px; }
+.tip .tr b { font-variant-numeric: tabular-nums; min-width: 34px; }
+.tip .say { margin-top: 6px; color: var(--text-2); font-style: italic; }
+.empty { color: var(--muted); padding: 22px 0; text-align: center; }
+/* lists */
+.feed { max-height: 320px; overflow: auto; margin: 0; padding: 0; list-style: none; }
+.feed li { display: grid; grid-template-columns: 58px 18px 1fr; gap: 6px; padding: 5px 0; border-bottom: 1px solid var(--grid); font-size: 12.5px; }
+.feed li:last-child { border-bottom: 0; }
+.feed .tm { color: var(--muted); font-variant-numeric: tabular-nums; }
+.feed .ic { text-align: center; }
+.transcript p { margin: 0; padding: 4px 0; border-bottom: 1px solid var(--grid); font-size: 13px; }
+.transcript p:last-child { border-bottom: 0; }
+.transcript .tm { color: var(--muted); font-size: 11.5px; margin-right: 8px; font-variant-numeric: tabular-nums; }
+.box-title { font-weight: 650; font-size: 13px; margin-bottom: 8px; }
+/* jobs */
+.jobs { width: 100%; border-collapse: collapse; }
+.jobs td, .jobs th { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--grid); font-size: 13px; vertical-align: middle; }
+.jobs th { font-size: 12px; color: var(--muted); font-weight: 600; }
+.jobs tr.sel td { background: var(--band); }
+.jobs tbody tr { cursor: pointer; }
+.jobs tbody tr:hover td { background: var(--band); }
+.kind { font-size: 11px; font-weight: 700; letter-spacing: 0.05em; color: var(--text-2); text-transform: uppercase; }
+.bar { height: 6px; background: var(--grid); border-radius: 999px; overflow: hidden; min-width: 90px; }
+.bar > div { height: 100%; background: var(--s1); border-radius: 999px; }
+.job-title { font-weight: 600; max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 760px) { .jobs .hide-sm { display: none; } .job-title { max-width: 200px; } }
+/* clips */
+.clips { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 14px; }
+.clip { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; display: flex; flex-direction: column; }
+.clip video { width: 100%; aspect-ratio: 9 / 16; background: #000; display: block; object-fit: contain; }
+.clip .body { padding: 10px 12px 12px; display: flex; flex-direction: column; gap: 4px; flex: 1; }
+.clip .ct { font-weight: 600; font-size: 13px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.clip .meta { font-size: 11.5px; color: var(--muted); }
+.clip button { margin-top: auto; align-self: flex-start; font: inherit; font-size: 12px; padding: 4px 10px; border-radius: 7px; border: 1px solid var(--border); background: var(--raised); color: var(--text); cursor: pointer; }
+.clip button:hover { border-color: var(--axis); }
+details summary { cursor: pointer; color: var(--text-2); font-size: 12.5px; margin-top: 10px; }
+.dtable { border-collapse: collapse; margin-top: 8px; font-size: 12px; width: 100%; }
+.dtable td, .dtable th { border-bottom: 1px solid var(--grid); padding: 4px 8px; text-align: left; font-variant-numeric: tabular-nums; }
+.dtable th { color: var(--muted); font-weight: 600; }
+.tabs { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+.tabs:empty { display: none; }
+.tab { font: inherit; font-size: 12.5px; display: inline-flex; align-items: center; gap: 7px; padding: 5px 12px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface); color: var(--text-2); cursor: pointer; }
+.tab i { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.tab.on { color: var(--text); border-color: var(--text-2); font-weight: 600; }
+.theme-btn { font: inherit; font-size: 12px; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface); color: var(--text-2); cursor: pointer; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Clipper</h1>
+    <div class="chips" id="chips"></div>
+    <span class="updated" id="updated">connecting…</span>
+    <button class="theme-btn" id="theme" type="button">Theme</button>
+  </header>
+  <div class="banner" id="banner">Can't reach the dashboard server. Is <code>uv run clip dashboard</code> still running?</div>
+
+  <h2>Background jobs</h2>
+  <div class="agents" id="agents"></div>
+
+  <h2>Live sessions</h2>
+  <div class="tabs" id="livetabs"></div>
+  <div class="card" id="live"></div>
+
+  <h2>All jobs</h2>
+  <div class="card" style="padding:4px 6px; overflow-x:auto">
+    <table class="jobs"><thead><tr><th>Job</th><th></th><th class="hide-sm">Stage</th><th>Progress</th><th class="hide-sm">Started</th><th>Status</th></tr></thead><tbody id="jobs"></tbody></table>
+  </div>
+  <div id="jobdetail"></div>
+
+  <h2>Clips <span class="muted" id="clipcount" style="text-transform:none;letter-spacing:0;font-weight:400"></span></h2>
+  <div class="clips" id="clips"></div>
+</div>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const SVGNS = "http://www.w3.org/2000/svg";
+let STATE = null, SELECTED = null, CLIPSIG = "", HOVERING = false;
+
+// ---------- tiny DOM helpers (all dynamic text goes through textContent) ----------
+function h(tag, attrs, ...kids) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (v == null || v === false) continue;
+    if (k === "class") el.className = v;
+    else if (k === "style") el.style.cssText = v;
+    else if (k.startsWith("on")) el.addEventListener(k.slice(2), v);
+    else el.setAttribute(k, v);
+  }
+  for (const kid of kids.flat()) {
+    if (kid == null || kid === false) continue;
+    el.appendChild(typeof kid === "string" || typeof kid === "number" ? document.createTextNode(String(kid)) : kid);
+  }
+  return el;
+}
+function s(tag, attrs, ...kids) {
+  const el = document.createElementNS(SVGNS, tag);
+  for (const [k, v] of Object.entries(attrs || {})) if (v != null) el.setAttribute(k, v);
+  for (const kid of kids.flat()) if (kid != null) el.appendChild(typeof kid === "string" ? document.createTextNode(kid) : kid);
+  return el;
+}
+const fmtTs = (sec) => {
+  sec = Math.max(0, sec || 0);
+  const hh = Math.floor(sec / 3600), mm = Math.floor(sec % 3600 / 60), ss = Math.floor(sec % 60);
+  return hh ? `${hh}:${String(mm).padStart(2, "0")}:${String(ss).padStart(2, "0")}` : `${mm}:${String(ss).padStart(2, "0")}`;
+};
+const ago = (t) => {
+  if (!t) return "never";
+  const d = Math.max(0, STATE.now - t);
+  if (d < 60) return `${Math.round(d)}s ago`;
+  if (d < 3600) return `${Math.round(d / 60)}m ago`;
+  if (d < 86400) return `${Math.round(d / 3600)}h ago`;
+  return `${Math.round(d / 86400)}d ago`;
+};
+const dur = (d) => d < 60 ? `${Math.round(d)}s` : d < 3600 ? `${Math.round(d / 60)}m` : `${(d / 3600).toFixed(1)}h`;
+const clock = (t) => new Date(t * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+const gb = (b) => b < 1e9 ? `${Math.round(b / 1e6)} MB` : `${(b / 1e9).toFixed(1)} GB`;
+const fmtK = (n) => n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}k` : String(n);
+
+// status pill: color + icon dot + label (color never alone)
+const STATES = {
+  running: ["var(--good)", "Running"], waiting: ["var(--warning)", "Waiting"], done: ["var(--axis)", "Done"],
+  failed: ["var(--critical)", "Failed"], stopped: ["var(--serious)", "Stopped"], skipped: ["var(--axis)", "Skipped"],
+  "not loaded": ["var(--serious)", "Not loaded"], spawn: ["var(--warning)", "Starting"],
+};
+function pill(state) {
+  const [c, label] = STATES[state] || ["var(--axis)", state || "?"];
+  return h("span", { class: "pill" }, h("i", { style: `background:${c}` }), label);
+}
+const ICONS = { spike: "▲", claude: "◆", clip: "✂", error: "!", info: "•", done: "✓" };
+
+// ---------- header ----------
+function renderHeader(st) {
+  const running = st.jobs.filter((j) => j.state === "running");
+  const live = running.filter((j) => j.kind === "live").length;
+  const other = running.length - live;
+  const free = st.disk.free;
+  const diskState = free < 1e9 ? "critical" : free < 3e9 ? "warning" : "good";
+  const u = st.usage_24h;
+  const chips = $("chips");
+  chips.replaceChildren(
+    h("span", { class: "chip" }, h("b", {}, String(live)), live === 1 ? " live session" : " live sessions"),
+    h("span", { class: "chip" }, h("b", {}, String(other)), " other job" + (other === 1 ? "" : "s") + " running"),
+    h("span", { class: "chip" }, h("i", { style: `display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;background:var(--${diskState})` }),
+      "Disk ", h("b", {}, gb(free)), " free", diskState !== "good" ? (diskState === "critical" ? " · critical" : " · low") : ""),
+    h("span", { class: "chip" }, "Claude (24h) ", h("b", {}, `${fmtK(u.input_tokens + u.output_tokens)} tokens`),
+      u.cost_usd ? ` · ≈ $${u.cost_usd.toFixed(2)} at API prices` : ""),
+  );
+  $("updated").textContent = `updated ${new Date(st.now * 1000).toLocaleTimeString()}`;
+}
+
+// ---------- background agents ----------
+function renderAgents(st) {
+  const box = $("agents");
+  if (!st.agents.length) {
+    box.replaceChildren(h("div", { class: "card muted" }, "No background jobs. Install one with ",
+      h("code", {}, "uv run clip autolive install <channel live URL>")));
+    return;
+  }
+  box.replaceChildren(...st.agents.map((a) => {
+    const job = st.jobs.find((j) => j.kind === "live" && j.url === a.url && ["running", "waiting"].includes(j.state));
+    const what = job ? (job.state === "waiting" ? "Waiting for the stream to go live" : `Recording: ${job.title}`) :
+      a.state === "running" ? "Running" : "Not running";
+    const shown = job ? job.state : (a.state === "running" ? "running" : "stopped");
+    return h("div", { class: "card agent" },
+      h("div", { class: "row" }, h("span", { class: "url" }, a.url.replace(/^https?:\/\//, "")), h("span", { class: "spacer" }), pill(shown)),
+      h("div", { class: "t2", style: "margin-top:4px" }, what),
+      h("div", { class: "muted", style: "font-size:12px;margin-top:2px" },
+        `launchd: ${a.state}${a.pid ? ` · pid ${a.pid}` : ""}${job && job.last_check ? ` · last checked ${ago(job.last_check)}` : ""}`),
+      h("pre", {}, (a.tail || []).slice(-4).join("\n")));
+  }));
+}
+
+// ---------- live session ----------
+const STAGES = [
+  ["recorder", "Recorder", "Streamlink → 30 s segments"],
+  ["transcriber", "Transcriber", "Whisper, model stays loaded"],
+  ["chat", "Live chat", "message rate"],
+  ["hype", "Hype detector", "loudness + chat spikes"],
+  ["claude", "Claude", "spike checks + passes"],
+  ["renderer", "Renderer", "reframe, captions, export"],
+];
+
+function pickLive(st) {
+  const sel = st.jobs.find((j) => j.id === SELECTED && j.kind === "live");
+  return sel || st.jobs.find((j) => j.kind === "live" && j.state === "running") ||
+    st.jobs.find((j) => j.kind === "live" && j.telemetry) || null;
+}
+
+function renderLiveTabs(st, current) {
+  const box = $("livetabs");
+  const lives = st.jobs.filter((j) => j.kind === "live" && (j.state === "running" || j.id === current?.id)).slice(0, 8);
+  if (lives.length < 2) { box.replaceChildren(); return; }
+  box.replaceChildren(...lives.map((j) => h("button", {
+    type: "button", class: "tab" + (current && j.id === current.id ? " on" : ""),
+    onclick: () => { SELECTED = j.id; render(); },
+  }, h("i", { style: `background:${(STATES[j.state] || ["var(--axis)"])[0]}` }),
+    (j.url || "").replace(/^https?:\/\/(www\.)?/, "").replace(/\/live$/, ""),
+    j.clips ? ` · ${j.clips} clip${j.clips === 1 ? "" : "s"}` : "")));
+}
+
+function renderLive(st) {
+  const box = $("live");
+  const job = pickLive(st);
+  renderLiveTabs(st, job);
+  if (!job) {
+    const waiting = st.jobs.find((j) => j.kind === "live" && j.state === "waiting");
+    box.replaceChildren(h("div", { class: "empty" },
+      waiting ? `No stream live right now. Waiting for ${waiting.url} (checked ${ago(waiting.last_check)}).` :
+        "No live session yet. Start one with  uv run clip live <url>"));
+    return;
+  }
+  const act = job.activity || {};
+  const tel = job.telemetry;
+  const buf = job.buffer || {};
+  const usage = job.usage || {};
+  const isLive = job.state === "running";
+  const head = h("div", { class: "live-head" },
+    h("div", { class: "row" }, h("h3", {}, job.title || job.url), h("span", { class: "spacer" }), pill(job.state)),
+    h("div", { class: "muted", style: "font-size:12.5px;margin-top:2px" },
+      `${job.url}${job.live_since ? ` · live since ${clock(job.live_since)}` : ""}${job.backend ? ` · picker: ${job.backend}` : ""}`),
+    h("div", { class: "stats" },
+      stat(fmtTs(job.stream_time || 0), "stream recorded"),
+      stat(String(job.clips || 0), "clips made"),
+      stat(buf.seconds != null ? `${Math.round(buf.seconds / 60)} min` : "–", `buffer${buf.bytes ? ` · ${gb(buf.bytes)}` : ""}`),
+      stat(isLive && job.next_review != null ? fmtTs(job.next_review) : "–", "next Claude pass"),
+      stat(job.pending ? String(job.pending) : "0", "spikes waiting"),
+      stat(usage.requests ? `${fmtK((usage.input_tokens || 0) + (usage.output_tokens || 0))}` : "0", `Claude tokens${usage.cost_usd ? ` · ≈ $${usage.cost_usd.toFixed(2)}` : ""}`)));
+
+  const flow = h("div", { class: "flow" }, ...STAGES.map(([key, name, hint], i) => {
+    const a = act[key];
+    const fresh = isLive && a && st.now - a.t < 45;  // segments land every ~30 s
+    return h("div", { class: "stage" },
+      h("div", { class: "n" }, h("span", { class: "dot" + (fresh ? " on" : "") }), name),
+      h("div", { class: "d" }, a ? a.detail : hint),
+      h("div", { class: "a" }, a ? ago(a.t) : "idle"),
+      i < STAGES.length - 1 ? h("span", { class: "arrow" }) : null);
+  }));
+
+  const chartBox = h("div");
+  const parts = [head, flow, chartBox];
+  if (tel) {
+    renderChart(chartBox, tel, job);
+    const lines = (tel.transcript || []).slice(-14).reverse();
+    const transcript = h("div", { class: "card transcript", style: "padding:12px 14px" },
+      h("div", { class: "box-title" }, "Latest transcript"),
+      lines.length ? lines.map((l) => h("p", {}, h("span", { class: "tm" }, fmtTs(l.t)), l.text)) :
+        h("div", { class: "muted" }, "Nothing said yet."));
+    parts.push(h("div", { class: "grid2", style: "margin-top:12px" }, transcript, feed(job)));
+  } else {
+    parts.push(h("div", { class: "empty" }, "Waiting for the first segment…"), feed(job));
+  }
+  box.replaceChildren(...parts);
+}
+const stat = (v, k) => h("div", { class: "stat" }, h("div", { class: "v" }, v), h("div", { class: "k" }, k));
+
+function feed(job) {
+  const ev = (job.events || []).slice(-60).reverse();
+  return h("div", { class: "card", style: "padding:12px 14px" },
+    h("div", { class: "box-title" }, "Activity"),
+    ev.length ? h("ul", { class: "feed" }, ev.map((e) => h("li", {},
+      h("span", { class: "tm" }, new Date(e.t * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })),
+      h("span", { class: "ic", style: e.kind === "error" ? "color:var(--critical)" : e.kind === "clip" ? "color:var(--s3)" : "" }, ICONS[e.kind] || "•"),
+      h("span", {}, e.text)))) : h("div", { class: "muted" }, "No activity yet."));
+}
+
+// ---------- the hype chart ----------
+function renderChart(box, tel, job) {
+  const loud = tel.loud || [], chat = tel.chat;
+  const n = loud.length;
+  const head = h("div", { class: "chart-head" },
+    h("span", { class: "title" }, "Hype signals, last 15 minutes"),
+    h("span", { class: "muted", style: "font-size:12px" }, "how far above this stream's normal level (standard deviations)"),
+    h("span", { class: "spacer" }),
+    h("div", { class: "legend" },
+      h("span", {}, h("i", { class: "key-line", style: "background:var(--s1)" }), "Loudness"),
+      h("span", {}, h("i", { class: "key-line", style: "background:var(--s2)" }), chat ? "Chat rate" : "Chat rate (no data yet)"),
+      h("span", {}, h("i", { class: "key-line", style: "background:var(--muted);height:0;border-top:1px dashed var(--muted)" }), "Spike threshold"),
+      h("span", {}, "▼ spike"),
+      h("span", {}, h("i", { class: "key-box", style: "background:var(--s3)" }), "Clip"),
+      h("span", {}, h("i", { class: "key-box", style: "background:var(--band);outline:1px solid var(--axis)" }), "Claude pass")));
+  const wrap = h("div", { class: "chart" });
+  const tip = h("div", { class: "tip" });
+  box.replaceChildren(head, wrap, dataTable(tel));
+  if (!n) { wrap.appendChild(h("div", { class: "empty" }, "Collecting the first seconds…")); return; }
+
+  const W = Math.max(320, wrap.clientWidth || 900);
+  const M = { l: 34, r: 74, t: 16 };
+  const PH = 190, LANE = 22, LG = 6;
+  const laneTop = M.t + PH + 14;
+  const H = laneTop + 2 * LANE + LG + 22;
+  const t0 = tel.t0, dt = tel.dt, t1 = t0 + Math.max(n, 2) * dt;
+  const span = Math.max(t1 - t0, 60);
+  const x = (t) => M.l + (t - t0) / span * (W - M.l - M.r);
+  const vals = loud.concat(chat || []);
+  const lo = Math.floor(Math.min(-1, ...vals));
+  const hi = Math.min(15, Math.ceil(Math.max(tel.threshold + 1.5, ...vals)));
+  const y = (v) => M.t + (hi - Math.max(lo, Math.min(hi, v))) / (hi - lo) * PH;
+
+  const svg = s("svg", { viewBox: `0 0 ${W} ${H}`, height: H, role: "img",
+    "aria-label": "Loudness and chat rate over the last 15 minutes, with spikes, clips and Claude passes" });
+  // grid + y ticks
+  const step = (hi - lo) > 10 ? 4 : 2;
+  for (let v = Math.ceil(lo / step) * step; v <= hi; v += step) {
+    svg.appendChild(s("line", { x1: M.l, x2: W - M.r, y1: y(v), y2: y(v), stroke: v === 0 ? "var(--axis)" : "var(--grid)", "stroke-width": 1 }));
+    svg.appendChild(s("text", { x: M.l - 6, y: y(v) + 4, "text-anchor": "end" }, String(v)));
+  }
+  // x ticks (stream time)
+  const tickEvery = span > 600 ? 180 : span > 240 ? 60 : 30;
+  for (let t = Math.ceil(t0 / tickEvery) * tickEvery; t <= t1; t += tickEvery) {
+    svg.appendChild(s("line", { x1: x(t), x2: x(t), y1: M.t + PH, y2: M.t + PH + 4, stroke: "var(--axis)" }));
+    svg.appendChild(s("text", { x: x(t), y: H - 6, "text-anchor": "middle" }, fmtTs(t)));
+  }
+  // threshold
+  svg.appendChild(s("line", { x1: M.l, x2: W - M.r, y1: y(tel.threshold), y2: y(tel.threshold), stroke: "var(--muted)", "stroke-dasharray": "4 4", "stroke-width": 1 }));
+  // series (2px lines) + direct labels at the right end
+  const line = (arr, color) => s("polyline", { fill: "none", stroke: color, "stroke-width": 2, "stroke-linejoin": "round", "stroke-linecap": "round",
+    points: arr.map((v, i) => `${x(t0 + i * dt).toFixed(1)},${y(v).toFixed(1)}`).join(" ") });
+  const ends = [["threshold", y(tel.threshold), ""]];
+  if (chat && chat.length) { svg.appendChild(line(chat, "var(--s2)")); ends.push(["Chat", y(chat[chat.length - 1]), "lane-label"]); }
+  svg.appendChild(line(loud, "var(--s1)")); ends.push(["Loudness", y(loud[loud.length - 1]), "lane-label"]);
+  // right-edge labels never overlap: stack them at least 13px apart, keeping order by height
+  const placed = ends.sort((a, b) => a[1] - b[1]);
+  for (let i = 1; i < placed.length; i++) if (placed[i][1] - placed[i - 1][1] < 13) placed[i][1] = placed[i - 1][1] + 13;
+  placed.forEach(([name, yy, cls]) => svg.appendChild(s("text", { x: W - M.r + 6, y: yy + 4, class: cls || null }, name)));
+
+  // spikes: ▼ at the top of the plot (filled = clipped)
+  const spikes = (tel.spikes || []).filter((sp) => sp.t >= t0 && sp.t <= t1);
+  for (const sp of spikes) {
+    const cx = x(sp.t), filled = sp.outcome === "clipped";
+    svg.appendChild(s("path", { d: `M${cx - 5},${M.t - 9} L${cx + 5},${M.t - 9} L${cx},${M.t - 1} Z`,
+      fill: filled ? "var(--text-2)" : "var(--surface)", stroke: "var(--text-2)", "stroke-width": 1.5 }));
+  }
+  // lanes
+  const lanes = [["Clips", laneTop], ["Claude", laneTop + LANE + LG]];
+  for (const [label, ly] of lanes) {
+    svg.appendChild(s("rect", { x: M.l, y: ly, width: W - M.l - M.r, height: LANE, rx: 4, fill: "var(--band)", opacity: 0.5 }));
+    svg.appendChild(s("text", { x: W - M.r + 6, y: ly + LANE / 2 + 4, class: "lane-label" }, label));
+  }
+  const clamp = (a, b) => [Math.max(a, t0), Math.min(b, t1)];
+  for (const c of (tel.clips || [])) {
+    const [a, b] = clamp(c.start, c.end); if (b <= a) continue;
+    const w = Math.max(3, x(b) - x(a));
+    svg.appendChild(s("rect", { x: x(a), y: laneTop + 3, width: w, height: LANE - 6, rx: 3, fill: "var(--s3)" }));
+    if (w > 46) svg.appendChild(s("text", { x: x(a) + 5, y: laneTop + LANE / 2 + 4, style: "fill:var(--on-fill);font-weight:600" }, c.name.replace("clip_", "#")));
+  }
+  for (const r of (tel.reviews || [])) {
+    const [a, b] = clamp(r.a, r.b); if (b <= a) continue;
+    const ly = laneTop + LANE + LG, w = Math.max(3, x(b) - x(a) - 2);
+    svg.appendChild(s("rect", { x: x(a) + 1, y: ly + 3, width: w, height: LANE - 6, rx: 3, fill: "var(--band)", stroke: "var(--axis)" }));
+    if (w > 60) svg.appendChild(s("text", { x: x(a) + 6, y: ly + LANE / 2 + 4, class: "lane-label" }, `→ ${r.result}`));
+  }
+  // hover: crosshair + one tooltip with every series
+  const cross = s("line", { y1: M.t - 10, y2: laneTop + 2 * LANE + LG, stroke: "var(--text-2)", "stroke-width": 1, visibility: "hidden" });
+  svg.appendChild(cross);
+  const hit = s("rect", { x: M.l, y: 0, width: W - M.l - M.r, height: H - 18, fill: "transparent" });
+  svg.appendChild(hit);
+  const tr = (tel.transcript || []);
+  const move = (ev) => {
+    const r = svg.getBoundingClientRect();
+    const px = (ev.clientX - r.left) * (W / r.width);
+    const i = Math.max(0, Math.min(n - 1, Math.round((px - M.l) / (W - M.l - M.r) * span / dt)));
+    const t = t0 + i * dt;
+    cross.setAttribute("x1", x(t)); cross.setAttribute("x2", x(t)); cross.setAttribute("visibility", "visible");
+    const rows = [h("div", { class: "tt" }, `stream ${fmtTs(t)}`),
+      h("div", { class: "tr" }, h("i", { class: "key-line", style: "background:var(--s1)" }), h("b", {}, loud[i].toFixed(1)), "Loudness")];
+    if (chat && chat[i] != null) rows.push(h("div", { class: "tr" }, h("i", { class: "key-line", style: "background:var(--s2)" }), h("b", {}, chat[i].toFixed(1)), "Chat rate"));
+    const sp = spikes.find((q) => Math.abs(q.t - t) <= 4);
+    if (sp) rows.push(h("div", { class: "tr" }, "▼", h("b", {}, sp.score.toFixed(1)), `spike · ${sp.outcome}`));
+    const c = (tel.clips || []).find((q) => t >= q.start && t <= q.end);
+    if (c) rows.push(h("div", { class: "tr" }, h("i", { class: "key-box", style: "background:var(--s3)" }), c.name, c.title ? ` · ${c.title}` : ""));
+    const said = tr.find((q) => t >= q.t - 0.5 && t <= q.e + 0.5);
+    if (said) rows.push(h("div", { class: "say" }, `"${said.text.slice(0, 140)}"`));
+    tip.replaceChildren(...rows);
+    tip.style.display = "block";
+    const left = (ev.clientX - r.left);
+    tip.style.left = `${Math.min(left + 14, r.width - 260)}px`;
+    tip.style.top = `${Math.max(0, ev.clientY - r.top - 20)}px`;
+  };
+  hit.addEventListener("pointermove", move);
+  hit.addEventListener("pointerenter", () => { HOVERING = true; });
+  hit.addEventListener("pointerleave", () => { HOVERING = false; tip.style.display = "none"; cross.setAttribute("visibility", "hidden"); });
+  wrap.append(svg, tip);
+}
+
+function dataTable(tel) {
+  const rows = [];
+  for (const sp of tel.spikes || []) rows.push([sp.t, "Spike", `score ${sp.score}`, sp.outcome]);
+  for (const c of tel.clips || []) rows.push([c.start, "Clip", `${c.name} (${Math.round(c.end - c.start)}s)`, c.title || ""]);
+  for (const r of tel.reviews || []) rows.push([r.a, "Claude pass", `${fmtTs(r.a)}–${fmtTs(r.b)}`, r.result]);
+  rows.sort((a, b) => b[0] - a[0]);
+  return h("details", {}, h("summary", {}, `Data table (${rows.length} events)`),
+    h("table", { class: "dtable" }, h("thead", {}, h("tr", {}, h("th", {}, "Stream time"), h("th", {}, "Type"), h("th", {}, "What"), h("th", {}, "Result"))),
+      h("tbody", {}, rows.map((r) => h("tr", {}, h("td", {}, fmtTs(r[0])), h("td", {}, r[1]), h("td", {}, r[2]), h("td", {}, r[3]))))));
+}
+
+// ---------- all jobs ----------
+const KIND = { live: "Live", vod: "VOD", watch: "Watch" };
+function renderJobs(st) {
+  const tbody = $("jobs");
+  if (!st.jobs.length) { tbody.replaceChildren(h("tr", {}, h("td", { colspan: 6, class: "muted" }, "No jobs yet."))); return; }
+  tbody.replaceChildren(...st.jobs.map((j) => {
+    const p = j.progress;
+    const prog = p != null ? h("div", { class: "row", style: "gap:8px;flex-wrap:nowrap" },
+      h("div", { class: "bar", style: "flex:1" }, h("div", { style: `width:${Math.round(p * 100)}%` })),
+      h("span", { class: "muted", style: "font-size:12px;font-variant-numeric:tabular-nums" }, `${Math.round(p * 100)}%`)) :
+      (j.kind === "live" && j.stream_time ? h("span", { class: "t2" }, `${fmtTs(j.stream_time)} recorded`) : h("span", { class: "muted" }, "–"));
+    const end = j.finished || st.now;
+    return h("tr", { class: j.id === SELECTED ? "sel" : "", onclick: () => { SELECTED = j.id; render(); } },
+      h("td", {}, h("span", { class: "kind" }, KIND[j.kind] || j.kind)),
+      h("td", {}, h("div", { class: "job-title", title: j.title }, j.title || j.id)),
+      h("td", { class: "hide-sm t2" }, j.stage || ""),
+      h("td", {}, prog),
+      h("td", { class: "hide-sm muted" }, `${clock(j.started)} · ${dur(end - j.started)}`),
+      h("td", {}, pill(j.state)));
+  }));
+}
+
+function renderJobDetail(st) {
+  const box = $("jobdetail");
+  const j = st.jobs.find((q) => q.id === SELECTED);
+  if (!j || j.kind === "live") { box.replaceChildren(); return; }
+  box.replaceChildren(h("div", { class: "grid2", style: "margin-top:12px" },
+    h("div", { class: "card" },
+      h("div", { class: "row" }, h("span", { class: "kind" }, KIND[j.kind] || j.kind), h("span", { class: "spacer" }), pill(j.state)),
+      h("div", { style: "font-weight:650;margin-top:6px" }, j.title),
+      h("div", { class: "t2", style: "margin-top:4px" }, j.stage || ""),
+      j.progress != null ? h("div", { class: "bar", style: "margin-top:10px" }, h("div", { style: `width:${Math.round(j.progress * 100)}%` })) : null,
+      j.usage && j.usage.requests ? h("div", { class: "muted", style: "margin-top:10px;font-size:12.5px" },
+        `Claude: ${fmtK(j.usage.input_tokens)} in + ${fmtK(j.usage.output_tokens)} out tokens${j.usage.cost_usd ? ` · ≈ $${j.usage.cost_usd.toFixed(3)} at API prices` : ""}`) : null,
+      j.out ? h("div", { class: "muted", style: "margin-top:6px;font-size:12px;word-break:break-all" }, j.out) : null),
+    feed(j)));
+}
+
+// ---------- clips gallery ----------
+function renderClips(st) {
+  const sig = st.clips.map((c) => c.src + c.made).join("|");
+  $("clipcount").textContent = st.clips.length ? `· ${st.clips.length} most recent` : "";
+  if (sig === CLIPSIG) return;  // don't reload videos that are playing
+  CLIPSIG = sig;
+  const box = $("clips");
+  if (!st.clips.length) { box.replaceChildren(h("div", { class: "muted" }, "No clips yet.")); return; }
+  box.replaceChildren(...st.clips.map((c) => {
+    const btn = h("button", { type: "button" }, "Copy caption");
+    btn.addEventListener("click", async () => {
+      try { await navigator.clipboard.writeText(c.caption); btn.textContent = "Copied"; }
+      catch { btn.textContent = "Copy failed"; }
+      setTimeout(() => (btn.textContent = "Copy caption"), 1500);
+    });
+    return h("div", { class: "clip" },
+      h("video", { src: `/media/${encodeURI(c.src)}#t=0.5`, controls: "", preload: "metadata", playsinline: "" }),
+      h("div", { class: "body" },
+        h("div", { class: "ct", title: c.title }, c.title || c.name),
+        h("div", { class: "meta" }, [c.score != null ? `score ${Math.round(c.score)}` : null, c.by, c.layout, `${Math.round(c.duration)}s`].filter(Boolean).join(" · ")),
+        h("div", { class: "meta", title: c.source_title }, `${c.source_title.slice(0, 60)} · ${new Date(c.made * 1000).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}`),
+        btn));
+  }));
+}
+
+// ---------- loop ----------
+function render() {
+  if (!STATE) return;
+  renderHeader(STATE); renderAgents(STATE);
+  if (!HOVERING) renderLive(STATE);  // keep the chart still while it's being read
+  renderJobs(STATE); renderJobDetail(STATE); renderClips(STATE);
+}
+async function poll() {
+  try {
+    const r = await fetch("/api/state", { cache: "no-store" });
+    STATE = await r.json();
+    $("banner").style.display = "none";
+    render();
+  } catch {
+    $("banner").style.display = "block";
+  }
+}
+let resizeT;
+window.addEventListener("resize", () => { clearTimeout(resizeT); resizeT = setTimeout(render, 150); });
+$("theme").addEventListener("click", () => {
+  const cur = document.documentElement.dataset.theme ||
+    (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+  const next = cur === "dark" ? "light" : "dark";
+  document.documentElement.dataset.theme = next;
+  try { localStorage.setItem("clipper-theme", next); } catch {}
+  render();
+});
+try { const t = localStorage.getItem("clipper-theme"); if (t) document.documentElement.dataset.theme = t; } catch {}
+poll();
+setInterval(poll, 2000);
+</script>
+</body>
+</html>
