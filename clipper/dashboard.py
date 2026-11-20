@@ -15,7 +15,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
-from . import autolive, status
+from . import autolive, status, youtube
 from .config import ROOT, Settings
 
 PAGE = Path(__file__).resolve().parent / "static" / "dashboard.html"
@@ -30,8 +30,16 @@ def _agents() -> list[dict]:
     return _agent_cache["data"]
 
 
+def _uploads() -> dict:
+    try:
+        return youtube.ledger()
+    except (OSError, ValueError):
+        return {}
+
+
 def _clips() -> list[dict]:
     items = []
+    ups = _uploads()
     for meta in OUT.glob("*/clip_*.json"):
         mp4 = meta.with_suffix(".mp4")
         if not mp4.exists():
@@ -47,6 +55,8 @@ def _clips() -> list[dict]:
             "duration": round(float(d.get("end", 0)) - float(d.get("start", 0)), 1),
             "source_title": d.get("source_title") or "", "reason": d.get("reason") or "",
             "made": mp4.stat().st_mtime, "size": mp4.stat().st_size,
+            "yt": {k: v for k, v in ups.get(f"{meta.parent.name}/{mp4.name}", {}).items()
+                   if k in ("status", "url", "privacy", "reason", "note")},
         })
     items.sort(key=lambda c: -c["made"])
     return items[:MAX_CLIPS]
@@ -64,7 +74,12 @@ def _state() -> dict:
     for j in jobs[12:]:  # older jobs: keep the list light
         j.pop("telemetry", None)
         j["events"] = j.get("events", [])[-5:]
-    return {"now": time.time(), "disk": {"free": du.free, "total": du.total}, "usage_24h": usage,
+    ups = _uploads().values()
+    yt = {"signed_in": youtube.signed_in(),
+          "uploaded_24h": sum(1 for e in ups if e.get("status") == "uploaded" and e.get("at", 0) >= day_ago),
+          "queued": sum(1 for e in ups if e.get("status") == "queued"),
+          "failed": sum(1 for e in ups if e.get("status") == "failed")}
+    return {"now": time.time(), "disk": {"free": du.free, "total": du.total}, "usage_24h": usage, "youtube": yt,
             "jobs": jobs[:40], "agents": _agents(), "clips": _clips()}
 
 

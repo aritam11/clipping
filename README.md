@@ -69,6 +69,39 @@ uv run clip live "https://www.youtube.com/watch?v=LIVE_ID"
 - Survives dropped connections (reconnects while the stream is live). Stops when the stream ends. `--wait` waits for the stream to start. `--max-per-hour` caps output.
 - Unattended safety: keeps the Mac from idle-sleeping while recording, stops saving clips below 1 GB free disk and ends the session below 0.6 GB. If Claude is unavailable (e.g. usage limit), hype spikes are still clipped without it.
 
+### YouTube uploads
+
+Add `--upload` to `clip run`, `clip watch` or `clip live` (or to an `autolive install … --` line) and each clip goes to your channel as a Short the moment it's rendered:
+
+```bash
+uv run clip live "https://www.youtube.com/@IShowSpeed/live" --upload
+uv run clip autolive install "https://www.youtube.com/@IShowSpeed/live" -- --upload --max-per-hour 6
+```
+
+What it sets on each upload:
+- **Title:** Claude's hook title, plus the streamer's name if it isn't already in it, plus `#shorts` (at most 100 characters).
+- **Description:** the hook line, a credit to the streamer with the stream's title and a link to the full stream, then the hashtags.
+- **Hashtags and tags:** the streamer first (people search for the name), then the game (for example #GTA6), then Claude's picks and #shorts. Search tags include "<streamer> clips" and "<streamer> live".
+- **Category and flags:** Gaming, not made for kids, and not AI-generated footage (it's real stream footage).
+
+**Safety and limits:**
+- No clip is uploaded twice; `work/uploads.json` records every upload.
+- YouTube allows about 100 uploads a day per project. `--uploads-per-day` (default 50) keeps you under that. Clips past the cap, or made while you're signed out, wait as "queued" and go up on the next run or with `uv run clip youtube retry`.
+- After each upload it checks the real privacy status. If YouTube locked the video to private (older, unaudited API projects), it tells you, and you can make the video public in YouTube Studio.
+- Use `--privacy unlisted` or `--privacy private` to review clips before they go public.
+- The dashboard shows each clip's YouTube link or queue state.
+
+**One-time setup per device (about 5 minutes):**
+1. In [Google Cloud Console](https://console.cloud.google.com/), create a project (any name, for example "clipper").
+2. Go to **APIs & Services → Library**, find **YouTube Data API v3**, and click **Enable**.
+3. Go to **APIs & Services → OAuth consent screen** and choose **External**. Fill in the app name and your email, add yourself under **Test users**, then set **Publishing status** to **In production**. In Testing mode Google expires the sign-in every 7 days. You'll see an "unverified app" warning when you sign in; that's expected for your own app.
+4. Go to **APIs & Services → Credentials → Create credentials → OAuth client ID**, choose **Desktop app**, and click **Download JSON**. Save the file as `credentials/client_secret.json` in this folder. `credentials/` is git-ignored, so it's never uploaded to GitHub.
+5. Run `uv run clip youtube auth`. Your browser opens; sign in with the Google account that owns the channel (pick the brand channel if you have several) and allow access. Check it worked with `uv run clip youtube status`.
+
+Other commands: `uv run clip youtube upload output/<folder> [--dry-run]` uploads clips you already have (`--dry-run` shows the title, description and tags without uploading). `uv run clip youtube retry` sends queued and failed uploads.
+
+Reposting other people's streams can get Content ID claims or copyright strikes. Clip streamers who allow it, or join their clipping programs.
+
 ### Dashboard
 
 ```bash

@@ -26,7 +26,7 @@ def probe(url: str) -> dict:
     return {
         "id": f"{(info.get('extractor_key') or 'web').lower()}-{info.get('id') or short_hash(url)}",
         "title": info.get("title") or "",
-        "uploader": info.get("uploader") or info.get("channel") or "",
+        "uploader": info.get("channel") or info.get("uploader") or "",
         "duration": float(info.get("duration") or 0),
         "is_live": bool(info.get("is_live")) or info.get("live_status") in ("is_live", "is_upcoming"),
         "url": info.get("webpage_url") or url,

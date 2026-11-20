@@ -41,3 +41,10 @@ class Settings:
     keep_work: bool = False
     max_height: int = 1080
     range: tuple[float, float] | None = None  # only process this part of the source (seconds)
+
+    # YouTube auto-upload (see clipper/youtube.py)
+    upload: bool = False
+    privacy: str = "public"
+    streamer: str = ""
+    uploads_per_day: int = 50
+    yt_category: str = "20"

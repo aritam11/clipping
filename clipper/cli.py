@@ -31,6 +31,12 @@ def _common(p: argparse.ArgumentParser) -> None:
     g.add_argument("--facecam", help="manual facecam box as x,y,w,h fractions, e.g. 0,0.7,0.25,0.3")
     g.add_argument("--no-hook", action="store_true", help="no hook text banner at the start")
     g.add_argument("--font", default=Settings.font)
+    g = p.add_argument_group("YouTube upload")
+    g.add_argument("--upload", action="store_true", help="upload each clip to your YouTube channel as it's made")
+    g.add_argument("--privacy", choices=["public", "unlisted", "private"], default="public")
+    g.add_argument("--streamer", default="", help="streamer name for titles/hashtags (default: from the source)")
+    g.add_argument("--uploads-per-day", type=int, default=50, help="daily upload cap (YouTube allows ~100)")
+    g.add_argument("--yt-category", default="20", help="YouTube category id (20 = Gaming)")
     g = p.add_argument_group("files")
     g.add_argument("--out", type=Path, default=Settings.out_dir)
     g.add_argument("--work", type=Path, default=Settings.work_dir)
@@ -51,7 +57,46 @@ def _settings(a: argparse.Namespace) -> Settings:
         whisper_model=a.whisper_model, language=a.language, layout=a.layout,
         fallback_layout=a.fallback_layout, facecam=facecam, hook_text=not a.no_hook, font=a.font,
         keep_work=a.keep_work, max_height=a.max_height,
+        upload=a.upload, privacy=a.privacy, streamer=a.streamer, uploads_per_day=a.uploads_per_day,
+        yt_category=a.yt_category,
     )
+
+
+def _youtube(a: argparse.Namespace) -> None:
+    from . import youtube as yt
+    cfg = yt.UploadConfig(privacy=a.privacy, streamer=a.streamer, per_day=a.uploads_per_day, category=a.yt_category)
+    try:
+        if a.action == "auth":
+            print(f"Signed in. Clips will upload to: {yt.auth()}")
+        elif a.action == "status":
+            if not yt.signed_in():
+                print("Not signed in. See 'YouTube uploads' in README.md, then run: uv run clip youtube auth")
+            else:
+                ch = yt.channel()
+                print(f"Channel: {ch['title'] if ch else '?'}")
+            entries = yt.ledger().values()
+            count = lambda s: sum(1 for e in entries if e.get("status") == s)  # noqa: E731
+            print(f"Uploaded in the last 24h: {yt.uploads_last_24h()} · total uploaded: {count('uploaded')} · "
+                  f"queued: {count('queued')} · failed: {count('failed')}")
+        elif a.action == "retry":
+            done = yt.retry_pending(cfg)
+            print(f"Processed {len(done)} queued/failed upload(s).")
+        else:  # upload
+            files = []
+            for p in a.paths:
+                files += sorted(p.glob("clip_*.mp4")) if p.is_dir() else [p]
+            if not files:
+                sys.exit("Give clip .mp4 files or output folders to upload.")
+            for f in files:
+                r = yt.upload(f, yt.meta_for(f), cfg, dry_run=a.dry_run)
+                if a.dry_run:
+                    sn = r["body"]["snippet"]
+                    print(f"\n=== {f}\nTITLE: {sn['title']}\nTAGS: {', '.join(sn['tags'])}\n"
+                          f"PRIVACY: {r['body']['status']['privacyStatus']}\nDESCRIPTION:\n{sn['description']}")
+                else:
+                    print(f"{f.name}: {r.get('status')} {r.get('url', r.get('reason', ''))}")
+    except yt.NotSignedIn as exc:
+        sys.exit(str(exc))
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -92,11 +137,23 @@ def main(argv: list[str] | None = None) -> None:
     au.add_argument("live_args", nargs=argparse.REMAINDER,
                     help="extra `clip live` options, after --  (e.g. -- --max-per-hour 6)")
 
+    yt = sub.add_parser("youtube", help="YouTube channel: sign in, upload clips, retry the queue")
+    yt.add_argument("action", choices=["auth", "status", "upload", "retry"])
+    yt.add_argument("paths", nargs="*", type=Path, help="for upload: clip .mp4 files or output folders")
+    yt.add_argument("--dry-run", action="store_true", help="show the title/description/tags without uploading")
+    yt.add_argument("--privacy", choices=["public", "unlisted", "private"], default="public")
+    yt.add_argument("--streamer", default="")
+    yt.add_argument("--uploads-per-day", type=int, default=50)
+    yt.add_argument("--yt-category", default="20")
+
     db = sub.add_parser("dashboard", help="open a live web dashboard of everything clipper is doing")
     db.add_argument("--port", type=int, default=8765)
     db.add_argument("--open", action="store_true", help="open it in your browser")
 
     a = ap.parse_args(argv)
+    if a.cmd == "youtube":
+        _youtube(a)
+        return
     if a.cmd == "dashboard":
         from .dashboard import serve
         serve(a.port, a.open)

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 import time
 from pathlib import Path
 
@@ -30,16 +31,19 @@ class Job:
         self.data = {"id": self.id, "kind": kind, "title": title, "pid": os.getpid(), "state": "running",
                      "started": now, "updated": now, "stage": "", "progress": None, "events": [], **fields}
         self._last_write = 0.0
+        self._lock = threading.RLock()  # the YouTube uploader thread reports here too
         self.flush(force=True)
 
     def update(self, force: bool = False, **fields) -> None:
-        self.data.update(fields)
-        self.flush(force)
+        with self._lock:
+            self.data.update(fields)
+            self.flush(force)
 
     def event(self, kind: str, text: str, **extra) -> None:
-        self.data["events"].append({"t": time.time(), "kind": kind, "text": text, **extra})
-        del self.data["events"][:-MAX_EVENTS]
-        self.flush(force=True)
+        with self._lock:
+            self.data["events"].append({"t": time.time(), "kind": kind, "text": text, **extra})
+            del self.data["events"][:-MAX_EVENTS]
+            self.flush(force=True)
 
     def finish(self, state: str = "done", text: str = "") -> None:
         self.data["state"] = state
@@ -50,17 +54,18 @@ class Job:
         self.flush(force=True)
 
     def flush(self, force: bool = False) -> None:
-        now = time.time()
-        if not force and now - self._last_write < 1.0:
-            return
-        self._last_write = now
-        self.data["updated"] = now
-        tmp = self.path.with_suffix(".tmp")
-        try:
-            tmp.write_text(json.dumps(self.data, ensure_ascii=False), encoding="utf-8")
-            tmp.replace(self.path)
-        except OSError:
-            pass  # a full disk must never take the pipeline down with it
+        with self._lock:
+            now = time.time()
+            if not force and now - self._last_write < 1.0:
+                return
+            self._last_write = now
+            self.data["updated"] = now
+            tmp = self.path.with_suffix(".tmp")
+            try:
+                tmp.write_text(json.dumps(self.data, ensure_ascii=False), encoding="utf-8")
+                tmp.replace(self.path)
+            except OSError:
+                pass  # a full disk must never take the pipeline down with it
 
 
 class NullJob(Job):
@@ -68,6 +73,7 @@ class NullJob(Job):
 
     def __init__(self):  # noqa: D107 - intentionally skips the file
         self.data = {"events": []}
+        self._lock = threading.RLock()
 
     def flush(self, force: bool = False) -> None:
         pass

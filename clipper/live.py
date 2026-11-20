@@ -31,7 +31,7 @@ from pathlib import Path
 
 import numpy as np
 
-from . import source
+from . import source, youtube
 from .captions import build_ass, words_in_range
 from .config import ROOT, Settings
 from .highlights import USAGE, SYSTEM, Clip, Unit, _snap, _via_api, _via_cli, build_units, choose_backend, transcript_for_llm
@@ -328,6 +328,9 @@ class Live:
         self.backend = choose_backend(st)
 
         self.title = ""
+        self.streamer = ""
+        self.video_url = ""
+        self.uploader: youtube.Uploader | None = None
         self.segs: list[Seg] = []
         self.transcript: dict = {"segments": []}
         self.loud = np.zeros(0, dtype=np.float64)
@@ -386,6 +389,20 @@ class Live:
                        "transcript": [{"t": s["start"], "e": s["end"], "text": s["text"]}
                                       for s in self.transcript["segments"][-60:]]},
         )
+
+    def _uploaded(self, mp4: Path, r: dict) -> None:
+        """Called from the uploader thread when a YouTube upload finishes."""
+        ok = r.get("status") == "uploaded"
+        self.activity["uploader"] = {"t": time.time(),
+                                     "detail": f"{mp4.stem} → {r.get('privacy', '')}" if ok else
+                                     f"{mp4.stem}: {r.get('status')} ({r.get('reason', '')})"}
+        for c in self.clip_log:
+            if c.get("file", "").endswith(f"/{mp4.name}") and ok:
+                c["url"] = r.get("url")
+        if self.job:
+            self.job.event("upload" if ok else "error",
+                           f"YouTube: {r.get('url')}" if ok else f"YouTube {r.get('status')}: {r.get('reason', '')}",
+                           url=r.get("url"))
 
     def _spike_outcome(self, t: float, outcome: str) -> None:
         for s in self.spike_log:
@@ -644,7 +661,8 @@ class Live:
             render(tmp, out, lay, ass, mi["has_audio"], start=s, end=e)
             meta = {**clip.to_dict(), "file": out.name, "layout": lay.mode, "stream_time": fmt_ts(clip.start),
                     "created": time.strftime("%Y-%m-%d %H:%M:%S"), "source_title": self.title,
-                    "source_url": self.url, "caption": f"{clip.title} {' '.join(clip.hashtags)}".strip(),
+                    "source_url": self.video_url or self.url, "streamer": self.st.streamer or self.streamer,
+                    "caption": f"{clip.title} {' '.join(clip.hashtags)}".strip(),
                     "transcript": " ".join(w["word"] for w in words).capitalize()}
             write_json(self.out / f"{name}.json", meta)
             with open(self.out / "posts.md", "a", encoding="utf-8") as f:
@@ -659,6 +677,9 @@ class Live:
             self._act("renderer", f"{name} done ({lay.mode})")
             if self.job:
                 self.job.event("clip", clip.title or name, file=rel, layout=lay.mode, stream_t=clip.start)
+            if self.uploader:  # straight to YouTube, in the background
+                self.uploader.enqueue(out, meta)
+                self._act("uploader", f"{name} queued for YouTube")
             ok = True
         except Exception as exc:  # noqa: BLE001
             log(f"  clip failed: {str(exc)[:300]}")
@@ -722,7 +743,9 @@ class Live:
             if not is_live(self.url):
                 return  # stream ended while paused; launchd restarts us to wait for the next one
         try:
-            self.title = source.probe(self.url).get("title", "")
+            info = source.probe(self.url)
+            self.title, self.streamer = info.get("title", ""), info.get("uploader", "")
+            self.video_url = info.get("url", "")  # the stream's own page, not the channel's /live address
         except Exception:  # noqa: BLE001 - title is cosmetic
             self.title = ""
         self._dirs()
@@ -730,6 +753,11 @@ class Live:
                         out=str(self.out), live_since=time.time(), backend=self.backend)
         self.job.event("info", f"Stream is live: {self.title or self.url}")
         awake = KeepAwake()
+        if self.st.upload:
+            cfg = youtube.config_from(self.st)
+            self.activity["uploader"] = {"t": time.time(), "detail": "ready"}
+            self.uploader = youtube.Uploader(cfg, on_done=self._uploaded)
+            threading.Thread(target=youtube.retry_pending, args=(cfg,), daemon=True).start()  # leftovers
         USAGE.update(requests=0, input_tokens=0, output_tokens=0, cost_usd=0.0)
         log(f"Live clipping: {self.title or self.url}")
         log(f"Picker: {self.backend}. Clips go to {self.out}")
@@ -780,6 +808,8 @@ class Live:
             self.chat.stop()
             if self.worker:
                 _stop([self.worker])
+            if self.uploader:
+                self.uploader.drain(timeout=100)  # unfinished uploads stay queued in work/uploads.json
             awake.release()
             _release_watchdogs()  # every helper is stopped; nothing left for them to clean up
             self._save()

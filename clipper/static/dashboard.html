@@ -61,7 +61,7 @@ h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.06em; color: 
 .stats { display: flex; flex-wrap: wrap; gap: 8px 22px; margin-top: 10px; }
 .stat .v { font-size: 20px; font-weight: 650; font-variant-numeric: tabular-nums; }
 .stat .k { font-size: 12px; color: var(--muted); }
-.flow { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; margin: 16px 0 6px; }
+.flow { display: grid; grid-template-columns: repeat(var(--n, 6), minmax(0, 1fr)); gap: 8px; margin: 16px 0 6px; }
 @media (max-width: 980px) { .flow { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 @media (max-width: 560px) { .flow { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .stage { position: relative; background: var(--raised); border: 1px solid var(--border); border-radius: 10px; padding: 9px 11px 10px; min-height: 84px; }
@@ -119,6 +119,8 @@ h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.06em; color: 
 .clip .body { padding: 10px 12px 12px; display: flex; flex-direction: column; gap: 4px; flex: 1; }
 .clip .ct { font-weight: 600; font-size: 13px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .clip .meta { font-size: 11.5px; color: var(--muted); }
+.clip a.yt { font-size: 12px; font-weight: 600; color: var(--text); text-decoration: none; }
+.clip a.yt:hover { text-decoration: underline; }
 .clip button { margin-top: auto; align-self: flex-start; font: inherit; font-size: 12px; padding: 4px 10px; border-radius: 7px; border: 1px solid var(--border); background: var(--raised); color: var(--text); cursor: pointer; }
 .clip button:hover { border-color: var(--axis); }
 details summary { cursor: pointer; color: var(--text-2); font-size: 12.5px; margin-top: 10px; }
@@ -216,7 +218,7 @@ function pill(state) {
   const [c, label] = STATES[state] || ["var(--axis)", state || "?"];
   return h("span", { class: "pill" }, h("i", { style: `background:${c}` }), label);
 }
-const ICONS = { spike: "▲", claude: "◆", clip: "✂", error: "!", info: "•", done: "✓" };
+const ICONS = { spike: "▲", claude: "◆", clip: "✂", upload: "▶", error: "!", info: "•", done: "✓" };
 
 // ---------- header ----------
 function renderHeader(st) {
@@ -227,15 +229,24 @@ function renderHeader(st) {
   const diskState = free < 1e9 ? "critical" : free < 3e9 ? "warning" : "good";
   const u = st.usage_24h;
   const chips = $("chips");
-  chips.replaceChildren(
+  const add = (...els) => chips.replaceChildren(...els.filter(Boolean));  // replaceChildren(null) would print "null"
+  add(
     h("span", { class: "chip" }, h("b", {}, String(live)), live === 1 ? " live session" : " live sessions"),
     h("span", { class: "chip" }, h("b", {}, String(other)), " other job" + (other === 1 ? "" : "s") + " running"),
     h("span", { class: "chip" }, h("i", { style: `display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;background:var(--${diskState})` }),
       "Disk ", h("b", {}, gb(free)), " free", diskState !== "good" ? (diskState === "critical" ? " · critical" : " · low") : ""),
     h("span", { class: "chip" }, "Claude (24h) ", h("b", {}, `${fmtK(u.input_tokens + u.output_tokens)} tokens`),
       u.cost_usd ? ` · ≈ $${u.cost_usd.toFixed(2)} at API prices` : ""),
+    ytChip(st.youtube),
   );
   $("updated").textContent = `updated ${new Date(st.now * 1000).toLocaleTimeString()}`;
+}
+
+function ytChip(y) {
+  if (!y) return null;
+  if (!y.signed_in) return h("span", { class: "chip" }, "YouTube: ", h("b", {}, "not connected"));
+  return h("span", { class: "chip" }, "YouTube (24h) ", h("b", {}, `${y.uploaded_24h} uploaded`),
+    y.queued ? ` · ${y.queued} queued` : "", y.failed ? ` · ${y.failed} failed` : "");
 }
 
 // ---------- background agents ----------
@@ -268,6 +279,7 @@ const STAGES = [
   ["hype", "Hype detector", "loudness + chat spikes"],
   ["claude", "Claude", "spike checks + passes"],
   ["renderer", "Renderer", "reframe, captions, export"],
+  ["uploader", "YouTube", "uploads each clip as it's made"],
 ];
 
 function pickLive(st) {
@@ -316,14 +328,15 @@ function renderLive(st) {
       stat(job.pending ? String(job.pending) : "0", "spikes waiting"),
       stat(usage.requests ? `${fmtK((usage.input_tokens || 0) + (usage.output_tokens || 0))}` : "0", `Claude tokens${usage.cost_usd ? ` · ≈ $${usage.cost_usd.toFixed(2)}` : ""}`)));
 
-  const flow = h("div", { class: "flow" }, ...STAGES.map(([key, name, hint], i) => {
+  const stages = STAGES.filter(([key]) => key !== "uploader" || act.uploader);  // YouTube only when uploading
+  const flow = h("div", { class: "flow", style: `--n:${stages.length}` }, ...stages.map(([key, name, hint], i) => {
     const a = act[key];
     const fresh = isLive && a && st.now - a.t < 45;  // segments land every ~30 s
     return h("div", { class: "stage" },
       h("div", { class: "n" }, h("span", { class: "dot" + (fresh ? " on" : "") }), name),
       h("div", { class: "d" }, a ? a.detail : hint),
       h("div", { class: "a" }, a ? ago(a.t) : "idle"),
-      i < STAGES.length - 1 ? h("span", { class: "arrow" }) : null);
+      i < stages.length - 1 ? h("span", { class: "arrow" }) : null);
   }));
 
   const chartBox = h("div");
@@ -522,6 +535,16 @@ function renderJobDetail(st) {
 }
 
 // ---------- clips gallery ----------
+function ytBadge(y) {
+  if (!y || !y.status) return null;
+  if (y.status === "uploaded") {
+    return h("a", { class: "yt", href: y.url, target: "_blank", rel: "noopener", title: y.note || "" },
+      `▶ On YouTube (${y.privacy || "?"})${y.note ? " ⚠" : ""}`);
+  }
+  const label = y.status === "queued" ? `YouTube: queued${y.reason && y.reason !== "uploading" ? ` (${y.reason})` : "…"}` :
+    `YouTube: failed (${y.reason || "error"})`;
+  return h("div", { class: "meta", style: y.status === "failed" ? "color:var(--critical)" : "" }, label);
+}
 function renderClips(st) {
   const sig = st.clips.map((c) => c.src + c.made).join("|");
   $("clipcount").textContent = st.clips.length ? `· ${st.clips.length} most recent` : "";
@@ -542,6 +565,7 @@ function renderClips(st) {
         h("div", { class: "ct", title: c.title }, c.title || c.name),
         h("div", { class: "meta" }, [c.score != null ? `score ${Math.round(c.score)}` : null, c.by, c.layout, `${Math.round(c.duration)}s`].filter(Boolean).join(" · ")),
         h("div", { class: "meta", title: c.source_title }, `${c.source_title.slice(0, 60)} · ${new Date(c.made * 1000).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}`),
+        ytBadge(c.yt),
         btn));
   }));
 }

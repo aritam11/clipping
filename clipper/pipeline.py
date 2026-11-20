@@ -10,7 +10,7 @@ import sys
 import time
 from pathlib import Path
 
-from . import source
+from . import source, youtube
 from .captions import build_ass, words_in_range
 from .config import Settings
 from .highlights import USAGE, pick_clips
@@ -141,12 +141,19 @@ def _process(src: str, st: Settings, job: Job) -> list[Path]:
             meta = {**c.to_dict(), "start": round(abs_s, 2), "end": round(abs_e, 2),
                     "file": out_mp4.name, "layout": lay.mode,
                     "source_title": info["title"], "source_url": info["url"],
+                    "streamer": st.streamer or info.get("uploader", ""),
                     "caption": f"{c.title} {' '.join(c.hashtags)}".strip(),
                     "transcript": " ".join(w["word"] for w in words).capitalize()}
             write_json(out_dir / f"{name}.json", meta)
             results.append(meta)
             written.append(out_mp4)
             job.event("clip", c.title or name, file=f"{out_dir.name}/{out_mp4.name}", layout=lay.mode)
+            if st.upload:
+                job.update(stage=f"Uploading clip {i}/{len(clips)} to YouTube", force=True)
+                r = youtube.upload(out_mp4, meta, youtube.config_from(st))
+                job.event("upload" if r.get("status") == "uploaded" else "error",
+                          f"YouTube: {r.get('status')} {r.get('url') or r.get('reason', '')}".strip(),
+                          url=r.get("url"))
         except Exception as exc:  # noqa: BLE001 - keep going with the other clips
             log(f"    clip failed: {exc}")
             job.event("error", f"{name} failed: {str(exc)[:200]}")
@@ -161,6 +168,8 @@ def _process(src: str, st: Settings, job: Job) -> list[Path]:
         posts.append(f"## {m['file']}  ({m['end'] - m['start']:.0f}s, score {m['score']}, by {m['picked_by']})\n"
                      f"{m['caption']}\n\n> {m['reason']}\n")
     (out_dir / "posts.md").write_text("\n".join(posts), encoding="utf-8")
+    if st.upload:  # also send anything left queued earlier (daily cap, sign-in expired, ...)
+        youtube.retry_pending(youtube.config_from(st))
 
     if not st.keep_work:  # media is big; keep only the small transcript/loudness cache
         for p in work.iterdir():
