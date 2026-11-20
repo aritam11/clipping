@@ -311,11 +311,15 @@ def _via_api(prompt: str, st: Settings) -> list[dict]:
 
 
 def _via_cli(prompt: str, st: Settings) -> list[dict]:
-    cmd = ["claude", "-p", "--output-format", "json", "--json-schema", json.dumps(SCHEMA),
+    exe = shutil.which("claude")  # full path: on Windows the CLI may be claude.exe or claude.cmd
+    if not exe:
+        raise RuntimeError("claude CLI not found on PATH")
+    cmd = [exe, "-p", "--output-format", "json", "--json-schema", json.dumps(SCHEMA),
            "--tools", "", "--model", st.cli_model, "--system-prompt", SYSTEM,
            "--no-session-persistence", "--strict-mcp-config"]
     with tempfile.TemporaryDirectory() as tmp:  # neutral cwd: no project CLAUDE.md
-        res = subprocess.run(cmd, input=prompt, capture_output=True, text=True, cwd=tmp, timeout=1800)
+        res = subprocess.run(cmd, input=prompt, capture_output=True, text=True, encoding="utf-8",
+                             errors="replace", cwd=tmp, timeout=1800)
     try:
         out = json.loads(res.stdout)
     except json.JSONDecodeError:

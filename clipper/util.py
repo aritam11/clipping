@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -24,7 +25,8 @@ class CmdError(RuntimeError):
 
 def run(cmd, cwd=None, capture=True, timeout=None, input=None) -> subprocess.CompletedProcess:
     cmd = [str(c) for c in cmd]
-    res = subprocess.run(cmd, cwd=cwd, capture_output=capture, text=True, timeout=timeout, input=input)
+    res = subprocess.run(cmd, cwd=cwd, capture_output=capture, text=True, encoding="utf-8", errors="replace",
+                         timeout=timeout, input=input)
     if res.returncode != 0:
         tail = ((res.stderr or "") + (res.stdout or ""))[-2000:] if capture else ""
         raise CmdError(f"command failed ({res.returncode}): {' '.join(cmd[:6])} ...\n{tail}")
@@ -89,5 +91,52 @@ def parse_ts(s: str) -> float:
 
 def write_json(path: Path, data) -> None:
     tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False))
+    tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
     tmp.replace(path)
+
+
+def read_json(path: Path):
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+# ---------------------------------------------------------------- cross-platform process helpers
+
+def utf8_stdio() -> None:
+    """Windows consoles/pipes default to a legacy code page; emoji in stream titles would crash prints."""
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
+
+
+def detached() -> dict:
+    """Popen kwargs so Ctrl-C in the terminal doesn't also kill helper processes mid-segment."""
+    if os.name == "nt":
+        return {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
+    return {"start_new_session": True}
+
+
+def pid_alive(pid: int) -> bool:
+    """Is this process still running? (Never use os.kill(pid, 0) on Windows: it terminates the process.)"""
+    if pid <= 0:
+        return False
+    if os.name == "nt":
+        import ctypes
+        k32 = ctypes.windll.kernel32
+        handle = k32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+        if not handle:
+            return False
+        code = ctypes.c_ulong()
+        ok = k32.GetExitCodeProcess(handle, ctypes.byref(code))
+        k32.CloseHandle(handle)
+        return bool(ok) and code.value == 259  # STILL_ACTIVE
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+    return True

@@ -39,7 +39,7 @@ from .reframe import analyze
 from .render import render
 from .signals import HOP, loudness_curve
 from .status import Job
-from .util import CmdError, fmt_ts, log, media_info, run, slugify, write_json, ytdlp_cmd
+from .util import CmdError, detached, fmt_ts, log, media_info, run, slugify, write_json, ytdlp_cmd
 
 CHAT_LAG = 10       # seconds of newest chat that are still incomplete
 START_FREE = 1.5e9  # don't start recording with less free disk than this
@@ -74,7 +74,7 @@ def robust_z(x: np.ndarray, tail: int = 7200) -> np.ndarray:
 def is_live(url: str) -> bool:
     try:
         r = subprocess.run([sys.executable, "-m", "streamlink", "--json", url],
-                           capture_output=True, text=True, timeout=120)
+                           capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120)
         return bool(json.loads(r.stdout or "{}").get("streams"))
     except (subprocess.TimeoutExpired, json.JSONDecodeError):
         return False
@@ -82,7 +82,8 @@ def is_live(url: str) -> bool:
 
 def _concat(paths: list[Path], dest: Path, args: list[str]) -> Path:
     lst = dest.with_suffix(".txt")
-    lst.write_text("".join(f"file '{p.resolve()}'\n" for p in paths))
+    # forward slashes: a Windows path's backslashes would be read as escapes by FFmpeg's concat format
+    lst.write_text("".join(f"file '{p.resolve().as_posix()}'\n" for p in paths), encoding="utf-8")
     try:
         run(["ffmpeg", "-y", "-v", "error", "-f", "concat", "-safe", "0", "-i", lst, *args, dest])
     finally:
@@ -90,12 +91,61 @@ def _concat(paths: list[Path], dest: Path, args: list[str]) -> Path:
     return dest
 
 
+_WATCHDOG = r"""
+import os, signal, subprocess, sys
+said = sys.stdin.read()  # returns when the parent closes the pipe, or the parent dies
+if said.strip() != "ok":  # parent died without cleaning up: stop its helpers
+    for pid in map(int, sys.argv[1:]):
+        try:
+            if os.name == "nt":
+                subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)], capture_output=True)
+            else:
+                os.kill(pid, signal.SIGTERM)
+        except Exception:
+            pass
+"""
+_watchdogs: list[subprocess.Popen] = []
+
+
 def _reaper(pids: list[int]) -> None:
     """Kill these helpers if this process ever dies without cleaning up (e.g. force-quit),
-    so a recorder can't keep filling the disk on its own."""
-    subprocess.Popen(["/bin/sh", "-c", f"while kill -0 {os.getpid()} 2>/dev/null; do sleep 5; done; "
-                      f"kill {' '.join(map(str, pids))} 2>/dev/null"],
-                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    so a recorder can't keep filling the disk on its own. Works on macOS, Linux and Windows:
+    the watchdog waits on a pipe that the OS closes when this process exits."""
+    p = subprocess.Popen([sys.executable, "-c", _WATCHDOG, *map(str, pids)], stdin=subprocess.PIPE,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **detached())
+    _watchdogs.append(p)
+
+
+def _release_watchdogs() -> None:
+    """Clean shutdown: tell every watchdog its helpers were already stopped."""
+    for p in _watchdogs:
+        try:
+            assert p.stdin
+            p.stdin.write(b"ok")
+            p.stdin.close()
+        except (OSError, ValueError, AssertionError):
+            pass
+    _watchdogs.clear()
+
+
+class KeepAwake:
+    """Stop the computer idle-sleeping while a stream is being recorded."""
+
+    def __init__(self):
+        self.proc = None
+        if sys.platform == "darwin" and shutil.which("caffeinate"):
+            self.proc = subprocess.Popen(["caffeinate", "-i", "-w", str(os.getpid())],
+                                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        elif os.name == "nt":
+            import ctypes
+            ctypes.windll.kernel32.SetThreadExecutionState(0x80000000 | 0x00000001)  # CONTINUOUS | SYSTEM_REQUIRED
+
+    def release(self) -> None:
+        if self.proc:
+            _stop([self.proc])
+        elif os.name == "nt":
+            import ctypes
+            ctypes.windll.kernel32.SetThreadExecutionState(0x80000000)
 
 
 def _stop(procs: list[subprocess.Popen]) -> None:
@@ -122,15 +172,15 @@ class Recorder:
         d = self.buf / f"run{len(self.runs) + 1}"
         d.mkdir(parents=True, exist_ok=True)
         self.runs.append(d)
-        # start_new_session: Ctrl-C in the terminal shouldn't kill these mid-segment; we stop them.
+        # detached(): Ctrl-C in the terminal shouldn't kill these mid-segment; we stop them ourselves.
         sl = subprocess.Popen([sys.executable, "-m", "streamlink", "--stdout", "--loglevel", "error",
                                self.url, self.quality],
-                              stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, start_new_session=True)
+                              stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, **detached())
         ff = subprocess.Popen(["ffmpeg", "-v", "error", "-i", "pipe:0", "-map", "0:v:0", "-map", "0:a:0?",
                                "-c", "copy", "-f", "segment", "-segment_time", str(self.seg_secs),
                                "-segment_format", "mpegts", "-segment_list", str(d / "segments.csv"),
                                "-segment_list_type", "csv", "-reset_timestamps", "1", str(d / "seg_%06d.ts")],
-                              stdin=sl.stdout, stderr=subprocess.DEVNULL, start_new_session=True)
+                              stdin=sl.stdout, stderr=subprocess.DEVNULL, **detached())
         assert sl.stdout
         sl.stdout.close()
         self.procs = [sl, ff]
@@ -148,7 +198,7 @@ class Recorder:
             csv = d / "segments.csv"
             if not csv.exists():
                 continue
-            text = csv.read_text()
+            text = csv.read_text(encoding="utf-8", errors="replace")
             lines = text.splitlines()
             if text and not text.endswith("\n"):
                 lines = lines[:-1]  # last line still being written
@@ -176,6 +226,7 @@ class Chat:
         m = re.search(r"twitch\.tv/([A-Za-z0-9_]+)", url)
         self.twitch = m.group(1).lower() if m and m.group(1).lower() != "videos" else None
         self.kind = "twitch" if self.twitch else ("youtube" if "youtu" in url else None)
+        self.proc: subprocess.Popen | None = None
 
     def start(self) -> None:
         if self.kind:
@@ -184,6 +235,8 @@ class Chat:
 
     def stop(self) -> None:
         self.stopping = True
+        if self.proc:  # stop the chat downloader now, not whenever the thread next wakes
+            _stop([self.proc])
 
     def _add(self, ts: float) -> None:
         with self.lock:
@@ -230,8 +283,9 @@ class Chat:
             stem = self.buf / f"chat{int(time.time())}"
             p = subprocess.Popen([*ytdlp_cmd(), "--skip-download", "--write-subs", "--sub-langs", "live_chat",
                                   "--no-warnings", "-o", str(stem), self.url],
-                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **detached())
             _reaper([p.pid])
+            self.proc = p
             started, pos = time.time(), 0
             part, done = Path(f"{stem}.live_chat.json.part"), Path(f"{stem}.live_chat.json")
             while not self.stopping and time.time() - started < 600 and p.poll() is None:
@@ -352,7 +406,7 @@ class Live:
         if self.st.language:
             cmd += ["--language", self.st.language]
         self.worker = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                       stderr=subprocess.DEVNULL, text=True, cwd=ROOT, start_new_session=True)
+                                       stderr=subprocess.DEVNULL, text=True, encoding="utf-8", errors="replace", cwd=ROOT, **detached())
         _reaper([self.worker.pid])
         assert self.worker.stdout
         for line in self.worker.stdout:
@@ -593,7 +647,7 @@ class Live:
                     "source_url": self.url, "caption": f"{clip.title} {' '.join(clip.hashtags)}".strip(),
                     "transcript": " ".join(w["word"] for w in words).capitalize()}
             write_json(self.out / f"{name}.json", meta)
-            with open(self.out / "posts.md", "a") as f:
+            with open(self.out / "posts.md", "a", encoding="utf-8") as f:
                 f.write(f"## {out.name}  (stream {fmt_ts(clip.start)}, {clip.end - clip.start:.0f}s, "
                         f"by {clip.picked_by})\n{meta['caption']}\n\n> {clip.reason}\n\n")
             self.clipped.append((clip.start, clip.end))
@@ -675,10 +729,7 @@ class Live:
         self.job.update(force=True, title=self.title or self.url, state="running", stage="Recording live",
                         out=str(self.out), live_since=time.time(), backend=self.backend)
         self.job.event("info", f"Stream is live: {self.title or self.url}")
-        # Keep a Mac from idle-sleeping while a stream is being recorded (macOS only).
-        caffeinate = subprocess.Popen(["caffeinate", "-i", "-w", str(os.getpid())],
-                                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) \
-            if shutil.which("caffeinate") else None
+        awake = KeepAwake()
         USAGE.update(requests=0, input_tokens=0, output_tokens=0, cost_usd=0.0)
         log(f"Live clipping: {self.title or self.url}")
         log(f"Picker: {self.backend}. Clips go to {self.out}")
@@ -729,8 +780,8 @@ class Live:
             self.chat.stop()
             if self.worker:
                 _stop([self.worker])
-            if caffeinate:
-                _stop([caffeinate])
+            awake.release()
+            _release_watchdogs()  # every helper is stopped; nothing left for them to clean up
             self._save()
             if not self.st.keep_work:
                 shutil.rmtree(self.buf, ignore_errors=True)

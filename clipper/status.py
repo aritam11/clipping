@@ -13,6 +13,7 @@ import time
 from pathlib import Path
 
 from .config import ROOT
+from .util import pid_alive
 
 STATUS_DIR = ROOT / "work" / "status"
 KEEP_DAYS = 7
@@ -56,7 +57,7 @@ class Job:
         self.data["updated"] = now
         tmp = self.path.with_suffix(".tmp")
         try:
-            tmp.write_text(json.dumps(self.data, ensure_ascii=False))
+            tmp.write_text(json.dumps(self.data, ensure_ascii=False), encoding="utf-8")
             tmp.replace(self.path)
         except OSError:
             pass  # a full disk must never take the pipeline down with it
@@ -86,13 +87,15 @@ def read_all() -> list[dict]:
     jobs = []
     for p in STATUS_DIR.glob("*.json"):
         try:
-            d = json.loads(p.read_text())
-        except (OSError, json.JSONDecodeError):
+            d = json.loads(p.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
             continue
         if d.get("state") in ("running", "waiting"):
             try:
-                os.kill(int(d.get("pid", 0)), 0)
-            except (OSError, ValueError):
+                alive = pid_alive(int(d.get("pid", 0)))
+            except (TypeError, ValueError):
+                alive = False
+            if not alive:
                 d["state"] = "stopped"
                 d["stage"] = "stopped unexpectedly"
         jobs.append(d)

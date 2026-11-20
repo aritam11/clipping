@@ -32,7 +32,11 @@ URL / file / watched folder
    Without either, it still runs with the simpler offline picker.
 4. First run downloads the Whisper model (~1.6 GB, cached afterwards). Leave a few GB of free disk for the model, downloads and clips.
 
-Works on macOS, Linux and Windows. Apple-Silicon Macs transcribe on the GPU; elsewhere it uses the CPU (use `--whisper-model small` if that's slow). `clip autolive` (start on every stream) is macOS-only; elsewhere run `clip live <url> --wait` from a terminal or your OS scheduler.
+Platforms: developed and tested on macOS (Apple Silicon). The code is written to also run on Windows and Linux (no macOS-only calls on those paths, UTF-8 file handling, Windows-safe process handling), but it hasn't been run on them yet, so report anything that breaks.
+
+- Transcription device is picked automatically: Apple GPU on M-series Macs, NVIDIA GPU (CUDA) on Windows/Linux when CUDA and cuDNN are installed, otherwise CPU. On CPU, `--whisper-model small` is much faster.
+- `clip autolive` (start on every stream) is macOS-only. On Windows/Linux, run `clip live <url> --wait` from a terminal, Task Scheduler or systemd.
+- Live mode keeps the computer awake while recording on macOS and Windows.
 
 ## Use it
 

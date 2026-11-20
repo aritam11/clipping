@@ -18,7 +18,7 @@ from .reframe import analyze
 from .render import render
 from .signals import loudness_curve, zscore
 from .status import Job, NullJob
-from .util import fmt_ts, log, media_info, write_json
+from .util import fmt_ts, log, media_info, read_json, write_json
 
 PROGRESS = re.compile(r"transcribed ([\d.]+) / ([\d.]+) min")
 
@@ -27,12 +27,13 @@ def transcribe(media: Path, out_json: Path, st: Settings, job: Job | None = None
     job = job or NullJob()
     if out_json.exists():
         log("Using cached transcript")
-        return json.loads(out_json.read_text())
+        return read_json(out_json)
     log(f"Transcribing with faster-whisper ({st.whisper_model}); long VODs take a while")
     cmd = [sys.executable, "-m", "clipper.transcribe_worker", str(media), str(out_json), "--model", st.whisper_model]
     if st.language:
         cmd += ["--language", st.language]
-    proc = subprocess.Popen(cmd, cwd=Path(__file__).resolve().parent.parent, stdout=subprocess.PIPE, text=True)
+    proc = subprocess.Popen(cmd, cwd=Path(__file__).resolve().parent.parent, stdout=subprocess.PIPE,
+                            text=True, encoding="utf-8", errors="replace")
     assert proc.stdout
     for line in proc.stdout:  # echo progress and pass it to the dashboard
         print(line, end="", flush=True)
@@ -42,7 +43,7 @@ def transcribe(media: Path, out_json: Path, st: Settings, job: Job | None = None
                        stage=f"Transcribing ({m.group(1)} / {m.group(2)} min)")
     if proc.wait() != 0 or not out_json.exists():
         raise RuntimeError("transcription failed (see output above)")
-    data = json.loads(out_json.read_text())
+    data = read_json(out_json)
     log(f"Transcribed {data['duration'] / 60:.1f} min in {data['seconds_taken'] / 60:.1f} min "
         f"({len(data['segments'])} segments, language={data['language']})")
     return data
@@ -159,7 +160,7 @@ def _process(src: str, st: Settings, job: Job) -> list[Path]:
     for m in results:
         posts.append(f"## {m['file']}  ({m['end'] - m['start']:.0f}s, score {m['score']}, by {m['picked_by']})\n"
                      f"{m['caption']}\n\n> {m['reason']}\n")
-    (out_dir / "posts.md").write_text("\n".join(posts))
+    (out_dir / "posts.md").write_text("\n".join(posts), encoding="utf-8")
 
     if not st.keep_work:  # media is big; keep only the small transcript/loudness cache
         for p in work.iterdir():

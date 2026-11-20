@@ -18,11 +18,33 @@ import os
 import sys
 import time
 
-ATTEMPTS = {"auto": [("mps", "float16"), ("cpu", "int8")], "mps": [("mps", "float16")], "cpu": [("cpu", "int8")]}
+def _auto_devices() -> list[tuple[str, str]]:
+    """Fastest first: Apple GPU on M-series Macs, NVIDIA GPU elsewhere if present, then CPU."""
+    import platform
+    order = []
+    if sys.platform == "darwin" and platform.machine() == "arm64":
+        order.append(("mps", "float16"))
+    else:
+        try:
+            import ctranslate2
+            if ctranslate2.get_cuda_device_count() > 0:
+                order.append(("cuda", "float16"))
+        except Exception:  # noqa: BLE001
+            pass
+    order.append(("cpu", "int8"))
+    return order
+
+
+ATTEMPTS = {"mps": [("mps", "float16"), ("cpu", "int8")], "cuda": [("cuda", "float16"), ("cpu", "int8")],
+            "cpu": [("cpu", "int8")]}
 
 
 def _load(WhisperModel, model_name: str, device: str, ctype: str):
     return WhisperModel(model_name, device=device, compute_type=ctype, cpu_threads=os.cpu_count() or 4)
+
+
+def _devices(choice: str) -> list[tuple[str, str]]:
+    return _auto_devices() if choice == "auto" else list(ATTEMPTS[choice])
 
 
 def _segments(model, media: str, language: str | None, offset: float = 0.0, progress: str | None = None):
@@ -51,7 +73,7 @@ def _segments(model, media: str, language: str | None, offset: float = 0.0, prog
 
 
 def _one_file(a, WhisperModel) -> None:
-    attempts = ATTEMPTS[a.device]
+    attempts = _devices(a.device)
     t0 = time.time()
     for i, (device, ctype) in enumerate(attempts):
         try:
@@ -65,15 +87,22 @@ def _one_file(a, WhisperModel) -> None:
     data = {"language": info.language, "duration": info.duration, "segments": out, "device": device,
             "seconds_taken": round(time.time() - t0, 1)}
     tmp = a.out + ".tmp"
-    with open(tmp, "w") as f:
+    with open(tmp, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False)
     os.replace(tmp, a.out)
 
 
 def _serve(a, WhisperModel) -> None:
-    attempts = list(ATTEMPTS[a.device])
-    device, ctype = attempts.pop(0)
-    model = _load(WhisperModel, a.model, device, ctype)
+    attempts = _devices(a.device)
+    model = None
+    while model is None:  # e.g. no Apple/NVIDIA GPU on this machine -> next device
+        device, ctype = attempts.pop(0)
+        try:
+            model = _load(WhisperModel, a.model, device, ctype)
+        except Exception as exc:  # noqa: BLE001
+            if not attempts:
+                raise
+            print(f"{device} unavailable ({str(exc)[:120]}); trying {attempts[0][0]}", file=sys.stderr, flush=True)
     print(json.dumps({"ready": True, "device": device}), flush=True)
     for line in sys.stdin:
         if not line.strip():
@@ -100,8 +129,10 @@ def main() -> None:
     ap.add_argument("--serve", action="store_true")
     ap.add_argument("--model", default="large-v3-turbo")
     ap.add_argument("--language", default=None)
-    ap.add_argument("--device", default="auto", choices=list(ATTEMPTS))
+    ap.add_argument("--device", default="auto", choices=["auto", *ATTEMPTS])
     a = ap.parse_args()
+    for stream in (sys.stdout, sys.stderr):  # transcripts aren't always ASCII; Windows pipes default to cp1252
+        stream.reconfigure(encoding="utf-8", errors="replace")
 
     from faster_whisper import WhisperModel
 

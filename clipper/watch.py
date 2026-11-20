@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-import fcntl
-import json
+import os
 import time
 from pathlib import Path
 
@@ -11,14 +10,30 @@ from . import source
 from .config import Settings
 from .pipeline import process
 from .status import Job
-from .util import log, write_json
+from .util import log, read_json, write_json
 
 MAX_ATTEMPTS = 3
 
 
+def _lock(path: Path):
+    """Exclusive lock so overlapping scheduled runs don't both work (works on macOS, Linux, Windows)."""
+    f = open(path, "a+")
+    try:
+        if os.name == "nt":
+            import msvcrt
+            msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        f.close()
+        return None
+    return f
+
+
 def _read_sources(path: Path) -> list[str]:
     out = []
-    for line in path.read_text().splitlines():
+    for line in path.read_text(encoding="utf-8").splitlines():
         line = line.split(" #", 1)[0].strip()  # "url  # note" -> "url"
         if line and not line.startswith("#"):
             out.append(line)
@@ -27,7 +42,7 @@ def _read_sources(path: Path) -> list[str]:
 
 def run_once(sources_file: Path, st: Settings, latest: int, min_dur: float, max_dur: float | None) -> int:
     state_path = st.work_dir / "state.json"
-    state = json.loads(state_path.read_text()) if state_path.exists() else {"videos": {}}
+    state = read_json(state_path) if state_path.exists() else {"videos": {}}
     done = 0
     job = Job("watch", f"Watch pass: {sources_file.name}", source=str(sources_file))
     for src in _read_sources(sources_file):
@@ -73,10 +88,8 @@ def run_once(sources_file: Path, st: Settings, latest: int, min_dur: float, max_
 def watch(sources_file: Path, st: Settings, latest: int = 3, interval: float = 0,
           min_dur: float = 60, max_dur: float | None = None) -> None:
     st.work_dir.mkdir(parents=True, exist_ok=True)
-    lock = open(st.work_dir / ".watch.lock", "w")
-    try:
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except BlockingIOError:
+    lock = _lock(st.work_dir / ".watch.lock")
+    if lock is None:
         log("Another watch run is still working; exiting")
         return
     while True:

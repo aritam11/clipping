@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 
 from .config import Settings
-from .util import log, parse_ts, require_tools
+from .util import log, parse_ts, require_tools, utf8_stdio
 
 
 def _common(p: argparse.ArgumentParser) -> None:
@@ -55,6 +55,7 @@ def _settings(a: argparse.Namespace) -> Settings:
 
 
 def main(argv: list[str] | None = None) -> None:
+    utf8_stdio()
     ap = argparse.ArgumentParser(prog="clip", description="Turn long videos into captioned vertical shorts.")
     sub = ap.add_subparsers(dest="cmd", required=True)
 

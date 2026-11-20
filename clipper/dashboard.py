@@ -8,8 +8,8 @@ from __future__ import annotations
 import json
 import mimetypes
 import shutil
-import subprocess
 import time
+import webbrowser
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -37,8 +37,8 @@ def _clips() -> list[dict]:
         if not mp4.exists():
             continue
         try:
-            d = json.loads(meta.read_text())
-        except (OSError, json.JSONDecodeError):
+            d = json.loads(meta.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
             continue
         items.append({
             "src": f"{meta.parent.name}/{mp4.name}", "folder": meta.parent.name, "name": mp4.stem,
@@ -142,7 +142,7 @@ def serve(port: int = 8765, open_browser: bool = False) -> None:
     url = f"http://127.0.0.1:{port}"
     print(f"Clipper dashboard: {url}  (Ctrl-C to stop)", flush=True)
     if open_browser:
-        subprocess.run(["open", url], check=False)
+        webbrowser.open(url)
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
