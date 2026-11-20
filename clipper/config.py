@@ -24,6 +24,7 @@ class Settings:
     llm: str = "auto"
     api_model: str = "claude-opus-5-5"
     cli_model: str = "opus"
+    picker_prompt: str = ""           # path to a skill/prompt file that replaces the built-in picker prompt
 
     # Transcription
     whisper_model: str = "large-v3-turbo"

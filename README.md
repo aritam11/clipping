@@ -136,6 +136,10 @@ Outputs land in `output/<video-id>/`:
 
 If Claude fails, the run falls back to the heuristic rather than stopping.
 
+**Using another model (GPT, Gemini, a local LLM, …):** [`skills/clip-picker/SKILL.md`](skills/clip-picker/SKILL.md) is a detailed, step-by-step skill for picking clips and writing titles, hooks and hashtags. It's written so that less capable models produce Claude-quality picks: a scoring rubric, hard timestamp rules, title and hook formulas, a worked example and a self-check, and its output matches clipper's JSON exactly.
+- Drop the folder into your agent's skills directory, or paste it in as the system prompt.
+- With clipper's own backends, pass it with `--picker-prompt skills/clip-picker/SKILL.md`.
+
 **Cost** is per hour of footage, not per clip: Claude reads the transcript once and picks every clip in one go. Measured on an hour of non-stop IShowSpeed talking: 13.8k input + 0.8k output tokens, about $0.11 at API prices ($0.02 per clip at 5 clips). Every run prints its usage and saves it in `index.json`.
 
 ## Useful flags

@@ -19,6 +19,8 @@ def _common(p: argparse.ArgumentParser) -> None:
     g.add_argument("--hashtags", default="#shorts #gaming", help="default hashtags for heuristic picks")
     g.add_argument("--llm", choices=["auto", "api", "claude-cli", "none"], default="auto",
                    help="auto: API if ANTHROPIC_API_KEY is set, else the claude CLI, else heuristic")
+    g.add_argument("--picker-prompt", default="",
+                   help="skill/prompt file for the clip picker, e.g. skills/clip-picker/SKILL.md")
     g.add_argument("--api-model", default=Settings.api_model)
     g.add_argument("--cli-model", default=Settings.cli_model)
     g = p.add_argument_group("transcription")
@@ -54,6 +56,7 @@ def _settings(a: argparse.Namespace) -> Settings:
     return Settings(
         out_dir=a.out, work_dir=a.work, clips=a.clips, min_len=a.min_len, max_len=a.max_len,
         topic=a.topic, hashtags=a.hashtags.split(), llm=a.llm, api_model=a.api_model, cli_model=a.cli_model,
+        picker_prompt=a.picker_prompt,
         whisper_model=a.whisper_model, language=a.language, layout=a.layout,
         fallback_layout=a.fallback_layout, facecam=facecam, hook_text=not a.no_hook, font=a.font,
         keep_work=a.keep_work, max_height=a.max_height,

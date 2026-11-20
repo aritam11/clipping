@@ -285,6 +285,18 @@ def _record(inp: int, outp: int, cost: float | None) -> None:
         + (f" (≈ ${cost:.3f} at API prices)" if cost else ""))
 
 
+def system_prompt(st: Settings) -> str:
+    """The picker's instructions: a skill file if --picker-prompt is given, else the built-in prompt."""
+    if not st.picker_prompt:
+        return SYSTEM
+    from pathlib import Path
+    text = Path(st.picker_prompt).expanduser().read_text(encoding="utf-8")
+    if text.startswith("---"):  # drop SKILL.md front matter (name/description)
+        parts = text.split("---", 2)
+        text = parts[2] if len(parts) == 3 else text
+    return text.strip()
+
+
 def _via_api(prompt: str, st: Settings) -> list[dict]:
     import anthropic
 
@@ -296,7 +308,7 @@ def _via_api(prompt: str, st: Settings) -> list[dict]:
         fallbacks="default",
         thinking={"type": "adaptive"},
         output_config={"effort": "high", "format": {"type": "json_schema", "schema": SCHEMA}},
-        system=SYSTEM,
+        system=system_prompt(st),
         messages=[{"role": "user", "content": prompt}],
     )
     u = resp.usage
@@ -315,7 +327,7 @@ def _via_cli(prompt: str, st: Settings) -> list[dict]:
     if not exe:
         raise RuntimeError("claude CLI not found on PATH")
     cmd = [exe, "-p", "--output-format", "json", "--json-schema", json.dumps(SCHEMA),
-           "--tools", "", "--model", st.cli_model, "--system-prompt", SYSTEM,
+           "--tools", "", "--model", st.cli_model, "--system-prompt", system_prompt(st),
            "--no-session-persistence", "--strict-mcp-config"]
     with tempfile.TemporaryDirectory() as tmp:  # neutral cwd: no project CLAUDE.md
         res = subprocess.run(cmd, input=prompt, capture_output=True, text=True, encoding="utf-8",
