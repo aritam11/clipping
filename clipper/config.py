@@ -25,6 +25,7 @@ class Settings:
     api_model: str = "claude-opus-5-5"
     cli_model: str = "opus"
     picker_prompt: str = ""           # path to a skill/prompt file that replaces the built-in picker prompt
+    codex_model: str = ""             # for --llm codex; empty = the model set in your Codex config
 
     # Transcription
     whisper_model: str = "large-v3-turbo"

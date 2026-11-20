@@ -19,6 +19,7 @@ import shutil
 import subprocess
 import tempfile
 from dataclasses import asdict, dataclass, field
+from pathlib import Path
 
 import numpy as np
 
@@ -276,21 +277,26 @@ def _prompt(title: str, duration: float, n: int, st: Settings, transcript_text: 
 USAGE = {"requests": 0, "input_tokens": 0, "output_tokens": 0, "cost_usd": 0.0}
 
 
-def _record(inp: int, outp: int, cost: float | None) -> None:
+def _record(inp: int, outp: int, cost: float | None, label: str = "Claude") -> None:
     USAGE["requests"] += 1
     USAGE["input_tokens"] += int(inp)
     USAGE["output_tokens"] += int(outp)
     USAGE["cost_usd"] += float(cost or 0)
-    log(f"  Claude usage: {inp:,} input + {outp:,} output tokens"
+    log(f"  {label} usage: {inp:,} input + {outp:,} output tokens"
         + (f" (≈ ${cost:.3f} at API prices)" if cost else ""))
 
 
-def system_prompt(st: Settings) -> str:
-    """The picker's instructions: a skill file if --picker-prompt is given, else the built-in prompt."""
-    if not st.picker_prompt:
+SKILL_FILE = Path(__file__).resolve().parent.parent / "skills" / "clip-picker" / "SKILL.md"
+
+
+def system_prompt(st: Settings, skill_default: bool = False) -> str:
+    """The picker's instructions: --picker-prompt if given; for backends that need more guidance
+    (skill_default, e.g. Codex), the bundled clip-picker skill; otherwise the built-in prompt."""
+    path = Path(st.picker_prompt).expanduser() if st.picker_prompt else (
+        SKILL_FILE if skill_default and SKILL_FILE.exists() else None)
+    if path is None:
         return SYSTEM
-    from pathlib import Path
-    text = Path(st.picker_prompt).expanduser().read_text(encoding="utf-8")
+    text = path.read_text(encoding="utf-8")
     if text.startswith("---"):  # drop SKILL.md front matter (name/description)
         parts = text.split("---", 2)
         text = parts[2] if len(parts) == 3 else text
@@ -352,17 +358,58 @@ def _via_cli(prompt: str, st: Settings) -> list[dict]:
     return data["clips"]
 
 
+def _via_codex(prompt: str, st: Settings) -> list[dict]:
+    """OpenAI Codex CLI (`codex exec`), using whatever model your Codex is set to (e.g. GPT 6 Luna).
+
+    Codex has no system-prompt flag, so the skill is sent at the top of the prompt. The reply is forced
+    into clipper's JSON with --output-schema; Codex runs read-only in an empty temp folder.
+    """
+    exe = shutil.which("codex")
+    if not exe:
+        raise RuntimeError("codex CLI not found on PATH")
+    full = (f"{system_prompt(st, skill_default=True)}\n\n---\n\n# Your task\n\n{prompt}\n\n"
+            "Return only the JSON object described above. Do not run commands or open files; "
+            "everything you need is in this message.")
+    with tempfile.TemporaryDirectory() as tmp:
+        schema, answer = Path(tmp) / "schema.json", Path(tmp) / "answer.json"
+        schema.write_text(json.dumps(SCHEMA), encoding="utf-8")
+        cmd = [exe, "exec", "-", "--output-schema", str(schema), "-o", str(answer),
+               "--skip-git-repo-check", "--sandbox", "read-only"]
+        if st.codex_model:
+            cmd += ["-m", st.codex_model]
+        res = subprocess.run(cmd, input=full, capture_output=True, text=True, encoding="utf-8",
+                             errors="replace", cwd=tmp, timeout=1800)
+        text = answer.read_text(encoding="utf-8", errors="replace") if answer.exists() else ""
+    text = text.strip() or res.stdout
+    m = re.search(r"\{.*\}", text, re.S)
+    if not m:
+        raise RuntimeError(f"codex returned no JSON (exit {res.returncode}): {(res.stderr or res.stdout)[-600:]}")
+    _record(len(full) // 4, len(m.group(0)) // 4, None, "Codex (estimated)")  # Codex doesn't report usage here
+    return json.loads(m.group(0))["clips"]
+
+
+BACKENDS = {"api": ("Claude API", "_via_api"), "claude-cli": ("claude CLI", "_via_cli"),
+            "codex": ("Codex", "_via_codex")}
+
+
+def call_backend(backend: str, prompt: str, st: Settings) -> list[dict]:
+    return globals()[BACKENDS[backend][1]](prompt, st)
+
+
 def choose_backend(st: Settings) -> str:
+    """auto: Anthropic API key → Claude Code login → Codex CLI → offline heuristic."""
     if st.llm != "auto":
         return st.llm
     if os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN"):
         return "api"
     if shutil.which("claude"):
         return "claude-cli"
+    if shutil.which("codex"):
+        return "codex"
     return "none"
 
 
-def _snap(raw: dict, units: list[Unit], duration: float, st: Settings) -> Clip | None:
+def _snap(raw: dict, units: list[Unit], duration: float, st: Settings, by: str = "claude") -> Clip | None:
     try:
         s, e = float(raw["start"]), float(raw["end"])
     except (KeyError, TypeError, ValueError):
@@ -388,7 +435,7 @@ def _snap(raw: dict, units: list[Unit], duration: float, st: Settings) -> Clip |
     tags = [t if t.startswith("#") else f"#{t}" for t in raw.get("hashtags", []) if t.strip()]
     return Clip(s, e, title=str(raw.get("title", ""))[:100], hook=str(raw.get("hook", ""))[:60],
                 hashtags=tags or list(st.hashtags), score=float(raw.get("score", 0)),
-                reason=str(raw.get("reason", "")), picked_by="claude")
+                reason=str(raw.get("reason", "")), picked_by=by)
 
 
 # ---------------------------------------------------------------- entry point
@@ -400,10 +447,10 @@ def pick_clips(transcript: dict, z: np.ndarray, duration: float, st: Settings, t
     backend = choose_backend(st)
     clips: list[Clip] = []
 
-    if backend in ("api", "claude-cli") and units:
-        call = _via_api if backend == "api" else _via_cli
+    if backend in BACKENDS and units:
+        call = lambda p, s: call_backend(backend, p, s)  # noqa: E731
         chunks = _chunks(units)
-        log(f"Asking Claude ({'API' if backend == 'api' else 'claude CLI'}) to pick up to {n} clips"
+        log(f"Asking {BACKENDS[backend][0]} to pick up to {n} clips"
             + (f" across {len(chunks)} parts" if len(chunks) > 1 else ""))
         try:
             raw = []
@@ -417,7 +464,8 @@ def pick_clips(transcript: dict, z: np.ndarray, duration: float, st: Settings, t
                 part = f" (this is part {k} of {len(chunks)}: seconds {a:.0f} to {b:.0f})"
                 log(f"  part {k}/{len(chunks)}")
                 raw += call(_prompt(title, duration, share, st, transcript_for_llm(cu, z, a, b), part), st)
-            cands = [c for c in (_snap(r, units, duration, st) for r in raw) if c]
+            by = "codex" if backend == "codex" else "claude"
+            cands = [c for c in (_snap(r, units, duration, st, by) for r in raw) if c]
             for c in sorted(cands, key=lambda c: -c.score):  # clip_01 = best
                 if all(c.end <= o.start or c.start >= o.end for o in clips):
                     clips.append(c)

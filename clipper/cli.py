@@ -17,8 +17,9 @@ def _common(p: argparse.ArgumentParser) -> None:
     g.add_argument("--max-len", type=float, default=60)
     g.add_argument("--topic", default=Settings.topic, help="niche hint for Claude, e.g. 'GTA VI roleplay'")
     g.add_argument("--hashtags", default="#shorts #gaming", help="default hashtags for heuristic picks")
-    g.add_argument("--llm", choices=["auto", "api", "claude-cli", "none"], default="auto",
-                   help="auto: API if ANTHROPIC_API_KEY is set, else the claude CLI, else heuristic")
+    g.add_argument("--llm", choices=["auto", "api", "claude-cli", "codex", "none"], default="auto",
+                   help="auto: Anthropic API key, else the claude CLI, else the codex CLI, else heuristic")
+    g.add_argument("--codex-model", default="", help="model for --llm codex (default: your Codex config's model)")
     g.add_argument("--picker-prompt", default="",
                    help="skill/prompt file for the clip picker, e.g. skills/clip-picker/SKILL.md")
     g.add_argument("--api-model", default=Settings.api_model)
@@ -56,7 +57,7 @@ def _settings(a: argparse.Namespace) -> Settings:
     return Settings(
         out_dir=a.out, work_dir=a.work, clips=a.clips, min_len=a.min_len, max_len=a.max_len,
         topic=a.topic, hashtags=a.hashtags.split(), llm=a.llm, api_model=a.api_model, cli_model=a.cli_model,
-        picker_prompt=a.picker_prompt,
+        picker_prompt=a.picker_prompt, codex_model=a.codex_model,
         whisper_model=a.whisper_model, language=a.language, layout=a.layout,
         fallback_layout=a.fallback_layout, facecam=facecam, hook_text=not a.no_hook, font=a.font,
         keep_work=a.keep_work, max_height=a.max_height,

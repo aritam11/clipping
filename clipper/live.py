@@ -34,7 +34,7 @@ import numpy as np
 from . import source, youtube
 from .captions import build_ass, words_in_range
 from .config import ROOT, Settings
-from .highlights import USAGE, SYSTEM, Clip, Unit, _snap, _via_api, _via_cli, build_units, choose_backend, transcript_for_llm
+from .highlights import USAGE, Clip, Unit, _snap, build_units, call_backend, choose_backend, transcript_for_llm
 from .reframe import analyze
 from .render import render
 from .signals import HOP, loudness_curve
@@ -326,6 +326,7 @@ class Live:
         self.max_secs = max_minutes * 60 if max_minutes else None
         self.wait = wait
         self.backend = choose_backend(st)
+        self._by = "codex" if self.backend == "codex" else "claude"
 
         self.title = ""
         self.streamer = ""
@@ -535,7 +536,7 @@ class Live:
         """Claude's picks ([] = nothing worth clipping), or None if the call itself failed
         (e.g. usage limit reached), so callers can fall back instead of silently stopping."""
         try:
-            return (_via_api if self.backend == "api" else _via_cli)(prompt, self.st)
+            return call_backend(self.backend, prompt, self.st)
         except Exception as exc:  # noqa: BLE001
             log(f"  Claude call failed: {str(exc)[:200]}")
             return None
@@ -571,7 +572,7 @@ class Live:
                           "If it is not worth clipping, return an empty clips list.\n\n"
                           f"{MARKERS}\n\n{transcript_for_llm(units, zl, a, b, zc)}")
                 raw = self._call(prompt)
-                clip = _snap(raw[0], units, b, self.st) if raw else None
+                clip = _snap(raw[0], units, b, self.st, self._by) if raw else None
                 if raw is None:  # Claude unavailable: keep clipping spikes without it
                     clip = Clip(max(0.0, t - 20), min(self.now, t + 12), hashtags=list(self.st.hashtags),
                                 reason="hype spike (Claude unavailable)", picked_by="spike")
@@ -584,7 +585,7 @@ class Live:
                 clip = Clip(max(0.0, t - 20), min(self.now, t + 12), hashtags=list(self.st.hashtags),
                             reason="hype spike", picked_by="spike")
             if clip:
-                clip.picked_by = "claude (spike)" if clip.picked_by == "claude" else clip.picked_by
+                clip.picked_by = f"{clip.picked_by} (spike)" if clip.picked_by in ("claude", "codex") else clip.picked_by
                 self._spike_outcome(t, "clipped" if self._make(clip) else "skipped")
             else:
                 self._spike_outcome(t, "passed")
@@ -611,7 +612,7 @@ class Live:
                      if taken else "")
                   + f"\n{MARKERS}\n\n{transcript_for_llm(units, zl, a, b, zc)}")
         raw = self._call(prompt)
-        picks = [c for c in (_snap(r, units, b, self.st) for r in (raw or [])) if c]
+        picks = [c for c in (_snap(r, units, b, self.st, self._by) for r in (raw or [])) if c]
         if not picks:
             log("  nothing clip-worthy in this stretch")
         made = 0

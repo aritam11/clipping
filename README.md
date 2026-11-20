@@ -132,7 +132,10 @@ Outputs land in `output/<video-id>/`:
 `--llm auto` (default) uses the first available of:
 1. **Anthropic API** (`claude-opus-5-5`) when `ANTHROPIC_API_KEY` is set.
 2. **The `claude` CLI**, which uses your Claude Code login and counts against your plan's usage limits. No API key needed.
-3. **Heuristic**: loudness peaks + reaction words ("no way", "let's go", …) + speech density. Free, offline, less smart.
+3. **The `codex` CLI** (OpenAI Codex), using whatever model your Codex is set to, for example GPT 6 Luna. It runs `codex exec` read-only and forces clipper's JSON format. It automatically gets the detailed [clip-picker skill](skills/clip-picker/SKILL.md) instead of the short built-in prompt. Force it with `--llm codex`; pick a model with `--codex-model <id>`.
+4. **Heuristic**: loudness peaks + reaction words ("no way", "let's go", …) + speech density. Free, offline, less smart.
+
+To check which picker ran, look for the `Asking … to pick` log line; `posts.md` also says `by claude`, `by codex` or `by heuristic`.
 
 If Claude fails, the run falls back to the heuristic rather than stopping.
 
