@@ -2,7 +2,7 @@
 name = "clipper"
 version = "0.1.0"
 description = "Automated long-video to vertical short-form clips pipeline"
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.13"  # rapidocr-onnxruntime supports up to 3.12
 dependencies = [
     "anthropic>=0.60",
     "faster-whisper>=1.1.0",
@@ -11,6 +11,7 @@ dependencies = [
     "numpy>=1.26",
     "opencv-python-headless>=4.9",
     "pydantic>=2.6",
+    "rapidocr-onnxruntime>=1.4",
     "streamlink>=8.6.3",
     "yt-dlp>=2025.1.1",
 ]
@@ -24,3 +25,8 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["clipper"]
+
+[tool.uv]
+# rapidocr asks for opencv-python; opencv-python-headless (above) provides the same cv2 module,
+# and installing both breaks cv2. Never install the GUI build.
+override-dependencies = ["opencv-python; sys_platform == 'never'"]

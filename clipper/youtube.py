@@ -218,6 +218,47 @@ def uploads_last_24h() -> int:
 
 # ---------------------------------------------------------------- uploading
 
+_thumbs_blocked = False  # this channel can't set custom Short thumbnails: stop spending quota on it
+
+
+def _reason(exc) -> str:
+    try:
+        return json.loads(exc.content.decode())["error"]["errors"][0].get("reason", "")
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def thumb_for(mp4: Path, meta: dict) -> Path | None:
+    jpg = mp4.with_name(meta["thumbnail"]) if meta.get("thumbnail") else mp4.with_suffix(".jpg")
+    return jpg if jpg.exists() else None
+
+
+def set_thumbnail(yt, vid: str, jpg: Path) -> str:
+    """Custom thumbnail for an uploaded Short (50 quota units). YouTube only allows custom Shorts
+    thumbnails for verified channels in the Partner Program; elsewhere the clip's first frame, which
+    clipper makes the same image, is what YouTube shows."""
+    global _thumbs_blocked
+    if _thumbs_blocked:
+        return "not allowed"
+    from googleapiclient.errors import HttpError
+    from googleapiclient.http import MediaFileUpload
+    try:
+        yt.thumbnails().set(videoId=vid, media_body=MediaFileUpload(str(jpg), mimetype="image/jpeg")).execute()
+        log("  YouTube: custom thumbnail set")
+        return "set"
+    except HttpError as exc:
+        if exc.resp.status == 403 and _reason(exc) not in ("quotaExceeded", "rateLimitExceeded"):
+            _thumbs_blocked = True
+            log("  YouTube: this channel can't set custom Short thumbnails yet (needs a verified channel in the "
+                "Partner Program). The thumbnail is still the clip's first frame.")
+            return "not allowed"
+        log(f"  YouTube: thumbnail not set ({exc.resp.status} {_reason(exc)})")
+        return f"failed: {exc.resp.status} {_reason(exc)}".strip()
+    except Exception as exc:  # noqa: BLE001
+        log(f"  YouTube: thumbnail not set ({str(exc)[:150]})")
+        return f"failed: {str(exc)[:100]}"
+
+
 def upload(mp4: Path, meta: dict, cfg: UploadConfig, dry_run: bool = False) -> dict:
     """Upload one clip. Returns its ledger entry (status uploaded / queued / failed / dry-run)."""
     key = _key(mp4)
@@ -225,8 +266,9 @@ def upload(mp4: Path, meta: dict, cfg: UploadConfig, dry_run: bool = False) -> d
     if prev.get("status") == "uploaded":
         return prev
     body = build_metadata(meta, cfg)
+    jpg = thumb_for(mp4, meta)
     if dry_run:
-        return {"status": "dry-run", "body": body}
+        return {"status": "dry-run", "body": body, "thumbnail": str(jpg) if jpg else ""}
     if uploads_last_24h() >= cfg.per_day:
         log(f"  YouTube: daily cap of {cfg.per_day} reached; queued {mp4.name}")
         return _record(key, status="queued", reason="daily cap", file=str(mp4), title=body["snippet"]["title"])
@@ -258,19 +300,17 @@ def upload(mp4: Path, meta: dict, cfg: UploadConfig, dry_run: bool = False) -> d
             note = ("YouTube locked this upload to private. Your Google Cloud project may need the YouTube API "
                     "audit before uploads can be public; meanwhile you can make it public in YouTube Studio.")
             log(f"  YouTube: {note}")
+        thumb = set_thumbnail(yt, vid, jpg) if jpg else ""
         entry = _record(key, status="uploaded", video_id=vid, url=f"https://www.youtube.com/shorts/{vid}",
-                        privacy=actual, note=note, at=time.time(), title=body["snippet"]["title"], file=str(mp4))
+                        privacy=actual, note=note, at=time.time(), title=body["snippet"]["title"], file=str(mp4),
+                        thumbnail=thumb, thumb_attempts=1 if thumb else 0)
         log(f"  YouTube: uploaded {mp4.name} → {entry['url']} ({actual})")
         return entry
     except NotSignedIn as exc:
         log(f"  YouTube: {exc}")
         return _record(key, status="queued", reason="not signed in", file=str(mp4), title=body["snippet"]["title"])
     except HttpError as exc:
-        reason = ""
-        try:
-            reason = json.loads(exc.content.decode())["error"]["errors"][0].get("reason", "")
-        except Exception:  # noqa: BLE001
-            pass
+        reason = _reason(exc)
         if reason in ("quotaExceeded", "uploadLimitExceeded", "rateLimitExceeded", "userRequestsExceedRateLimit"):
             log(f"  YouTube: limit reached ({reason}); queued {mp4.name} for later")
             return _record(key, status="queued", reason=reason, file=str(mp4), title=body["snippet"]["title"])
@@ -294,6 +334,17 @@ def retry_pending(cfg: UploadConfig) -> list[dict]:
     """Upload everything queued (daily cap / limits / not signed in) or failed fewer than 3 times."""
     done = []
     for key, e in ledger().items():
+        if (e.get("status") == "uploaded" and str(e.get("thumbnail", "")).startswith("failed")
+                and e.get("thumb_attempts", 0) < MAX_ATTEMPTS and not _thumbs_blocked):
+            mp4 = Path(e.get("file") or (ROOT / "output" / key))
+            jpg = thumb_for(mp4, meta_for(mp4)) if mp4.exists() else None
+            if jpg:
+                try:
+                    _record(key, thumbnail=set_thumbnail(_service(), e["video_id"], jpg),
+                            thumb_attempts=e.get("thumb_attempts", 0) + 1)
+                except NotSignedIn:
+                    pass
+            continue
         if e.get("status") == "queued" or (e.get("status") == "failed" and e.get("attempts", 0) < MAX_ATTEMPTS):
             mp4 = Path(e.get("file") or (ROOT / "output" / key))
             if mp4.exists():

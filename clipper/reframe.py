@@ -26,7 +26,7 @@ MODEL = Path(__file__).resolve().parent.parent / "models" / "face_detection_yune
 OUT_W, OUT_H = 1080, 1920
 TOP_H = 640            # facecam panel height in the stack layout
 SAMPLE_FPS = 2.5       # face-detection samples per second
-DET_W = 512
+DET_W = 1024           # detection width: smaller misses a 720p stream's facecam
 CAPTION_Y = {"stack": TOP_H + 10, "face": 1300, "crop": 1300, "zoom": 1380, "blur": 1420}
 
 
@@ -68,7 +68,7 @@ def _scene_cuts(path: Path, start: float, dur: float) -> list[float]:
     r = subprocess.run(
         ["ffmpeg", "-v", "error", "-ss", f"{start:.3f}", "-t", f"{dur:.3f}", "-i", str(path), "-an",
          "-vf", "scale=320:-2,scdet=threshold=10:sc_pass=1,metadata=print:file=-", "-f", "null", "-"],
-        capture_output=True, text=True,
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
     )
     cuts = sorted({float(m) for m in re.findall(r"lavfi\.scd\.time=([\d.]+)", r.stdout)})
     return [c for c in cuts if 0.3 < c < dur - 0.3]
@@ -193,6 +193,25 @@ def _expr(segs: list[tuple[float, float, float, float]]) -> str:
     for seg in reversed(merged[:-1]):
         expr = f"if(lt(t,{seg[1]:.3f}),{val(*seg)},{expr})"
     return expr
+
+
+def face_in_box(path: Path, start: float, dur: float, W: int, H: int, box: tuple[int, int, int, int],
+                samples: int = 6) -> bool:
+    """Is there a face inside this source-pixel box in any of a few frames of the clip?"""
+    import cv2
+
+    frames, _ = _frames(path, start, dur, W, H)
+    if not frames:
+        return False
+    step = max(1, len(frames) // samples)
+    sx = DET_W / W
+    x, y, w, h = box
+    crops = []
+    for f in frames[::step][:samples]:
+        c = f[int(y * sx):int((y + h) * sx), int(x * sx):int((x + w) * sx)]
+        if c.size:
+            crops.append(cv2.resize(c, (DET_W, _even(DET_W * c.shape[0] / max(c.shape[1], 1)))))
+    return any(d for d in _detect(crops))
 
 
 # ---------------------------------------------------------------- entry points

@@ -52,8 +52,11 @@ def _clips() -> list[dict]:
             "src": f"{meta.parent.name}/{mp4.name}", "folder": meta.parent.name, "name": mp4.stem,
             "title": d.get("title") or "", "caption": d.get("caption") or "", "score": d.get("score"),
             "by": d.get("picked_by") or "", "layout": d.get("layout") or "",
-            "duration": round(float(d.get("end", 0)) - float(d.get("start", 0)), 1),
+            "duration": d.get("duration") or round(float(d.get("end", 0)) - float(d.get("start", 0)), 1),
             "source_title": d.get("source_title") or "", "reason": d.get("reason") or "",
+            "thumb": f"{meta.parent.name}/{mp4.stem}.jpg" if mp4.with_suffix(".jpg").exists() else None,
+            "combined": (d.get("extra") or {}).get("combined"), "evidence": (d.get("extra") or {}).get("evidence") or [],
+            "frames": (d.get("extra") or {}).get("frames") or "",
             "made": mp4.stat().st_mtime, "size": mp4.stat().st_size,
             "yt": {k: v for k, v in ups.get(f"{meta.parent.name}/{mp4.name}", {}).items()
                    if k in ("status", "url", "privacy", "reason", "note")},

@@ -17,3 +17,5 @@ samples/
 .DS_Store
 *.tmp
 .claude/settings.local.json
+models/voxceleb_resnet34_LM.onnx
+models/*.part

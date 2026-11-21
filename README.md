@@ -26,6 +26,7 @@ URL / file / watched folder
    cd clipping
    uv sync
    ```
+   uv uses Python 3.11 for this project (`.python-version`) and downloads it if needed, whatever Python the machine has. The OCR library behind game-dialogue detection only supports Python up to 3.12.
 3. Give it access to Claude for picking clips, either way works:
    - install [Claude Code](https://claude.com/claude-code) and sign in once (`claude`), or
    - set `ANTHROPIC_API_KEY` in your environment.
@@ -37,6 +38,8 @@ Platforms: developed and tested on macOS (Apple Silicon). The code is written to
 - Transcription device is picked automatically: Apple GPU on M-series Macs, NVIDIA GPU (CUDA) on Windows/Linux when CUDA and cuDNN are installed, otherwise CPU. On CPU, `--whisper-model small` is much faster.
 - `clip autolive` (start on every stream) is macOS-only. On Windows/Linux, run `clip live <url> --wait` from a terminal, Task Scheduler or systemd.
 - Live mode keeps the computer awake while recording on macOS and Windows.
+- Live mode's extra work per 30 s of stream (subtitle OCR, voice prints, frame checks) took about 2–3 s on an M4. On a slower CPU without a GPU for Whisper, it can fall behind real time. Use `--whisper-model small`, or `--no-speakers` to skip the game-dialogue detection.
+- The first live run downloads the voice model (26 MB) into `models/`.
 
 ## Use it
 
@@ -62,10 +65,27 @@ uv run clip live "https://www.youtube.com/watch?v=LIVE_ID"
 
 `clip live` records the stream into a rolling buffer (`--keep-minutes`, default 20) and handles each 30-second segment as it arrives:
 
-- **Transcribes it** (the model stays loaded, so it keeps up with real time), and tracks loudness and the **live-chat message rate**: anonymous Twitch IRC, or YouTube live chat via yt-dlp.
-- **Hype spikes**: a loudness or chat burst well above the stream's normal level triggers a quick Claude check of the surrounding ~90 s. If Claude agrees, the clip is cut about 20 s after the moment.
+- **Transcribes it** (the model stays loaded, so it keeps up with real time), and tracks loudness and **live chat**: anonymous Twitch IRC, or YouTube live chat via yt-dlp.
+- **Reads what chat says**, not just how fast it moves. Every message is sorted into a reaction (laughing: KEKW, LMAO, 😂, 💀 · hyped: W, POG, 🔥 · shocked: ???, WTF, NO WAY · an L · F / RIP · "clip it"). The picker sees how chat reacted to each line, for example `(CHAT: laughing)`, plus chat's most repeated messages at its biggest reactions ("HE CRASHED ×14"). These often name what happened when the streamer's words don't.
+- **Twitch viewer clips** (optional): when viewers clip the stream, each clip is checked and clipped too, with the viewer's title as context. Every viewer clip is a real person saying "this was worth clipping". To turn it on, create a free app at [dev.twitch.tv/console/apps](https://dev.twitch.tv/console/apps): any name, OAuth redirect `http://localhost`, category "Application Integration", client type "Confidential". Then save its id and secret as `credentials/twitch.json`: `{"client_id": "…", "client_secret": "…"}`. Environment variables `TWITCH_CLIENT_ID` and `TWITCH_CLIENT_SECRET` also work.
+- **Hype spikes**: a burst of loudness, chat activity or chat reactions well above the stream's normal level triggers a quick Claude check of the surrounding ~90 s. If Claude agrees, the clip is cut about 20 s after the moment.
 - **Claude pass every `--review-every` minutes** (default 10) over the last `--lookback` minutes (default 12), to catch moments the spikes missed.
 - Clips are cut straight from the buffer and land in `output/live-<stream>-<time>/`, with a `posts.md` that grows as clips are made.
+- **A quality bar, so only real moments become clips.** Every candidate goes through three gates:
+  1. **Evidence:** something measurable must happen inside it. That means one of this stream's loudest moments so far, a sustained reaction, a real chat reaction burst (small chats need a minimum number of messages), "clip it" requests, a viewer clip, chat quoting the line, or big on-screen text like WASTED or MISSION FAILED. Nicely written picks with no evidence are dropped, unless the picker rates them 88+.
+  2. **Frame check:** the picker chose from the transcript alone, so it now gets 8 frames from the clip, one at its loudest moment. It keeps the clip only if something visibly happens, and rewrites the title to match what's on screen. This adds about 3,000–4,000 tokens per candidate; turn it off with `--no-frame-check`.
+  3. **Score:** the picker's score, nudged up or down by the evidence, must reach `--min-score` (default 70). The picker's scores are calibrated: 90+ iconic, 75–89 strong, 60–74 forgettable (not made).
+  - Spikes and viewer clips that pass are made at once. Picks from the regular passes wait about 7 minutes and are made only if they're among the best in their 20 minutes (a third of `--max-per-hour`).
+  - Dropped candidates are logged with the reason (`✗ … frame check: walking through a hotel lobby`).
+- **Iconic signs** the picker sees: `(TOP 1% LOUDEST)` for the stream's biggest reactions, `(LONG REACTION)`, `(CHAT QUOTES THIS ×N)` when chat repeats a line (that's how catchphrases start), and `(ON SCREEN: "WASTED")`.
+- **What the audience wants:** at the start of the stream and hourly, clipper looks up YouTube's search suggestions for "<streamer> <game>" (e.g. "ishowspeed gta 6 crash") and this month's most-viewed short videos about the streamer. The picker uses them to prefer the kinds of moments people search for, and to title clips with their words. Turn it off with `--no-demand`.
+- **Tighter edits:** a clip runs on past its last word while the audio is still loud, so the laugh or scream after the punchline isn't cut off (Whisper doesn't transcribe laughter). Dead air is cut out: a slow lead-in, pauses over 0.8 s, and a quiet tail. "Dead" is strict, because in gameplay a silent stretch can be the moment itself. A pause is only cut if nobody talks, the audio is no louder than usual, the picture is nearly still, and it isn't the build-up right before a loud reaction. Turn it off with `--no-tighten`.
+- **Captions for the right voices:** Whisper hears everything, including a story-mode cutscene's dialogue, which used to be captioned as if the streamer said it, on top of the game's own subtitles. Live mode now labels every line as the streamer, game dialogue or another person:
+  - **Game subtitles:** the lower middle of the frame is read with OCR (RapidOCR). A line that matches the on-screen subtitle is game dialogue. This is precise, and friends on a call never get subtitles, so they're never mistaken for NPCs.
+  - **Cutscene bars:** black cinematic bars mean a cutscene.
+  - **Voice prints:** a small voice model ([WeSpeaker](https://github.com/wenet-e2e/wespeaker), 26 MB, downloaded on first use into `models/`) learns the streamer's voice during the stream and breaks ties.
+  - Captions skip game dialogue and show other people (friends on call, RP players) in light blue. `--caption-voices streamer` captions only the streamer, and `--caption-voices all` captions everything. The picker sees `(GAME DIALOGUE)` / `(OTHER VOICE)` markers, so titles never credit an NPC's line to the streamer. `--no-speakers` turns all of this off.
+- **Designed thumbnail:** each clip gets `clip_NNN.jpg`, the streamer's best reaction frame (picked by loudness, a visible face and sharpness) in the clip's layout, with 1–4 big words written by the picker ("WRONG WAY"). It's also put on the clip's very first frame, because YouTube uses the first frame as a Short's default thumbnail. `--no-thumb-frame` turns that off, and `--no-thumbnail` turns off thumbnails altogether.
 - Survives dropped connections (reconnects while the stream is live). Stops when the stream ends. `--wait` waits for the stream to start. `--max-per-hour` caps output.
 - Unattended safety: keeps the Mac from idle-sleeping while recording, stops saving clips below 1 GB free disk and ends the session below 0.6 GB. If Claude is unavailable (e.g. usage limit), hype spikes are still clipped without it.
 
@@ -83,6 +103,7 @@ What it sets on each upload:
 - **Description:** the hook line, a credit to the streamer with the stream's title and a link to the full stream, then the hashtags.
 - **Hashtags and tags:** the streamer first (people search for the name), then the game (for example #GTA6), then Claude's picks and #shorts. Search tags include "<streamer> clips" and "<streamer> live".
 - **Category and flags:** Gaming, not made for kids, and not AI-generated footage (it's real stream footage).
+- **Thumbnail:** live clips upload their designed thumbnail as a custom thumbnail (50 extra quota units). YouTube only allows custom Short thumbnails for verified channels in the YouTube Partner Program. If your channel isn't eligible yet, clipper notices once per run and stops trying, and the thumbnail still shows because it's the clip's first frame. YouTube shows custom Short thumbnails in search, on your channel page and in subscriptions; the Shorts feed itself plays the video.
 
 **Safety and limits:**
 - No clip is uploaded twice; `work/uploads.json` records every upload.
@@ -156,6 +177,7 @@ If Claude fails, the run falls back to the heuristic rather than stopping.
 | `--facecam x,y,w,h` | manual facecam box as 0–1 fractions, e.g. `0,0.7,0.25,0.3` for bottom-left |
 | `--whisper-model small` | faster, less accurate transcription |
 | `--no-hook` | skip the hook text banner |
+| `--min-score 70` | live: the quality bar (1–100). Lower it for more clips, raise it for fewer, better ones |
 | `--keep-work` | keep downloaded media (otherwise deleted after rendering to save disk) |
 
 ## Automating it

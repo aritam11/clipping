@@ -5,6 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 
 HIGHLIGHT = "&H0000FFFF&"   # ASS colours are &HAABBGGRR -> yellow
+OTHER_BASE = "&H00FFD27A&"  # light blue: someone other than the streamer (friend on call, RP player)
+OTHER_HIGHLIGHT = "&H00FFFFFF&"
 MAX_WORDS = 3
 MAX_CHARS = 16
 
@@ -30,8 +32,18 @@ def words_in_range(transcript: dict, start: float, end: float) -> list[dict]:
             continue
         for w in seg.get("words", []):
             if w["start"] >= start - 0.05 and w["end"] <= end + 0.05 and _clean(w["word"]):
-                out.append({"start": w["start"] - start, "end": w["end"] - start, "word": _clean(w["word"])})
+                out.append({"start": w["start"] - start, "end": w["end"] - start, "word": _clean(w["word"]),
+                            "speaker": w.get("speaker", "streamer")})
     return out
+
+
+def for_captions(words: list[dict], voices: str = "auto") -> list[dict]:
+    """Which words get captions. auto: the streamer and other real people, not game dialogue (the game
+    shows its own subtitles); streamer: the streamer only; all: everything Whisper heard."""
+    if voices == "all":
+        return words
+    keep = {"streamer"} if voices == "streamer" else {"streamer", "other"}
+    return [w for w in words if w.get("speaker", "streamer") in keep]
 
 
 def _groups(words: list[dict]) -> list[list[dict]]:
@@ -39,7 +51,8 @@ def _groups(words: list[dict]) -> list[list[dict]]:
     for w in words:
         if cur and (len(cur) >= MAX_WORDS
                     or len(" ".join(x["word"] for x in cur + [w])) > MAX_CHARS
-                    or w["start"] - cur[-1]["end"] > 0.45):
+                    or w["start"] - cur[-1]["end"] > 0.45
+                    or w.get("speaker") != cur[-1].get("speaker")):
             groups.append(cur)
             cur = []
         cur.append(w)
@@ -78,15 +91,19 @@ def build_ass(words: list[dict], duration: float, out: Path, caption_y: int, fon
             ev_end = g[wi + 1]["start"] if wi + 1 < len(g) else g_end
             if ev_end <= ev_start:
                 continue
+            other = g[0].get("speaker") == "other"
+            base, hi = (OTHER_BASE, OTHER_HIGHLIGHT) if other else ("", HIGHLIGHT)
+            restore = f"{{\\c{base}}}" if base else ""   # \\r resets to the style's white
             parts = []
             for k, x in enumerate(g):
                 shown = x["word"].rstrip(",.")
                 if k == wi:
-                    parts.append(f"{{\\c{HIGHLIGHT}\\fscx112\\fscy112}}{shown}{{\\r}}")
+                    parts.append(f"{{\\c{hi}\\fscx112\\fscy112}}{shown}{{\\r}}{restore}")
                 else:
                     parts.append(shown)
             pop = "\\t(0,80,\\fscx104\\fscy104)\\t(80,160,\\fscx100\\fscy100)" if wi == 0 else ""
+            colour = f"\\c{base}" if base else ""
             lines.append(f"Dialogue: 0,{_ts(ev_start)},{_ts(ev_end)},Cap,,0,0,0,,"
-                         f"{{\\pos(540,{caption_y}){pop}}}{' '.join(parts)}")
+                         f"{{\\pos(540,{caption_y}){colour}{pop}}}{' '.join(parts)}")
     out.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return out

@@ -96,7 +96,8 @@ def _youtube(a: argparse.Namespace) -> None:
                 if a.dry_run:
                     sn = r["body"]["snippet"]
                     print(f"\n=== {f}\nTITLE: {sn['title']}\nTAGS: {', '.join(sn['tags'])}\n"
-                          f"PRIVACY: {r['body']['status']['privacyStatus']}\nDESCRIPTION:\n{sn['description']}")
+                          f"PRIVACY: {r['body']['status']['privacyStatus']}\n"
+                          f"THUMBNAIL: {r.get('thumbnail') or '(none: first frame)'}\nDESCRIPTION:\n{sn['description']}")
                 else:
                     print(f"{f.name}: {r.get('status')} {r.get('url', r.get('reason', ''))}")
     except yt.NotSignedIn as exc:
@@ -133,6 +134,21 @@ def main(argv: list[str] | None = None) -> None:
     lv.add_argument("--no-spikes", action="store_true", help="only use the periodic Claude passes")
     lv.add_argument("--max-per-hour", type=int, default=12, help="cap on clips per hour")
     lv.add_argument("--max-minutes", type=float, help="stop after this many minutes")
+    lv.add_argument("--no-tighten", action="store_true", help="don't cut dead air or extend clips into the reaction")
+    lv.add_argument("--no-thumbnail", action="store_true", help="don't make a designed thumbnail")
+    lv.add_argument("--no-thumb-frame", action="store_true",
+                    help="don't put the thumbnail on the first frame (YouTube's default thumbnail for a Short)")
+    lv.add_argument("--caption-voices", choices=["auto", "streamer", "all"], default="auto",
+                    help="auto: caption the streamer and other real people (friends, RP players), not game "
+                         "dialogue; streamer: only the streamer; all: everything, game dialogue included")
+    lv.add_argument("--no-speakers", action="store_true",
+                    help="don't tell the streamer apart from game dialogue (saves CPU; captions everything)")
+    lv.add_argument("--min-score", type=float, default=70,
+                    help="quality bar (1-100): only clips scoring this or more are made; lower = more clips")
+    lv.add_argument("--no-frame-check", action="store_true",
+                    help="don't show the picker frames of each candidate (saves tokens; weaker picks)")
+    lv.add_argument("--no-demand", action="store_true",
+                    help="don't look up what viewers search for and watch about the streamer")
     _common(lv)
 
     au = sub.add_parser("autolive", help="clip a channel automatically every time it goes live (background job)")
@@ -198,6 +214,9 @@ def main(argv: list[str] | None = None) -> None:
         sys.exit(1 if failed else 0)
     elif a.cmd == "live":
         from .live import Live
+        st.tighten, st.thumbnail, st.thumb_frame = not a.no_tighten, not a.no_thumbnail, not a.no_thumb_frame
+        st.speakers, st.caption_voices = not a.no_speakers, a.caption_voices
+        st.min_score, st.frame_check, st.demand = a.min_score, not a.no_frame_check, not a.no_demand
         try:
             Live(a.url, st, seg_secs=a.segment, review_every=a.review_every * 60, lookback=a.lookback * 60,
                  keep_minutes=a.keep_minutes, quality=a.quality, spikes=not a.no_spikes,

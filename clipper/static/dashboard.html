@@ -132,6 +132,36 @@ details summary { cursor: pointer; color: var(--text-2); font-size: 12.5px; marg
 .tab { font: inherit; font-size: 12.5px; display: inline-flex; align-items: center; gap: 7px; padding: 5px 12px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface); color: var(--text-2); cursor: pointer; }
 .tab i { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
 .tab.on { color: var(--text); border-color: var(--text-2); font-weight: 600; }
+/* quality gate: candidates */
+.cands { display: flex; flex-direction: column; }
+.cand { display: grid; grid-template-columns: 66px minmax(0, 1fr) 118px; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--grid); }
+.cand:last-child { border-bottom: 0; }
+.cand .when { font-variant-numeric: tabular-nums; font-size: 12.5px; }
+.cand .src { font-size: 11px; color: var(--muted); margin-top: 2px; }
+.cand .ttl { font-weight: 600; font-size: 13px; overflow-wrap: anywhere; }
+.cand .note { font-size: 12px; color: var(--text-2); margin-top: 4px; overflow-wrap: anywhere; }
+.cand .score { text-align: right; }
+.cand .score .big { font-size: 18px; font-weight: 650; font-variant-numeric: tabular-nums; }
+.cand .score .small { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.cand.dropped .ttl, .cand.dropped .big { color: var(--text-2); }
+.evs { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
+.ev { font-size: 11px; padding: 1px 8px; border-radius: 999px; background: var(--band); color: var(--text-2); white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.out { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 600; white-space: nowrap; margin-top: 3px; }
+.out i { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.bar-mini { height: 4px; background: var(--grid); border-radius: 999px; overflow: hidden; margin-top: 5px; position: relative; }
+.bar-mini > div { height: 100%; border-radius: 999px; }
+.bar-mini > b { position: absolute; top: -2px; width: 1px; height: 8px; background: var(--text-2); }
+@media (max-width: 560px) { .cand { grid-template-columns: 52px minmax(0, 1fr) 70px; gap: 8px; } }
+/* audience */
+.qs { display: flex; flex-wrap: wrap; gap: 6px; }
+.q { font-size: 12px; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--border); background: var(--raised); color: var(--text); }
+.tops { margin: 6px 0 0; padding: 0; list-style: none; }
+.tops li { display: flex; gap: 10px; padding: 4px 0; border-bottom: 1px solid var(--grid); font-size: 12.5px; }
+.tops li:last-child { border-bottom: 0; }
+.tops .v { color: var(--muted); font-variant-numeric: tabular-nums; min-width: 44px; text-align: right; }
+.sub { font-size: 12px; color: var(--muted); margin: 10px 0 6px; }
+.transcript p.game { color: var(--muted); }
+.who { font-size: 11px; margin-right: 6px; }
 .theme-btn { font: inherit; font-size: 12px; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface); color: var(--text-2); cursor: pointer; }
 </style>
 </head>
@@ -218,7 +248,7 @@ function pill(state) {
   const [c, label] = STATES[state] || ["var(--axis)", state || "?"];
   return h("span", { class: "pill" }, h("i", { style: `background:${c}` }), label);
 }
-const ICONS = { spike: "▲", claude: "◆", clip: "✂", upload: "▶", error: "!", info: "•", done: "✓" };
+const ICONS = { spike: "▲", claude: "◆", clip: "✂", upload: "▶", error: "!", info: "•", done: "✓", gate: "✗", crowd: "◎" };
 
 // ---------- header ----------
 function renderHeader(st) {
@@ -275,12 +305,30 @@ function renderAgents(st) {
 const STAGES = [
   ["recorder", "Recorder", "Streamlink → 30 s segments"],
   ["transcriber", "Transcriber", "Whisper, model stays loaded"],
-  ["chat", "Live chat", "message rate"],
-  ["hype", "Hype detector", "loudness + chat spikes"],
-  ["claude", "Claude", "spike checks + passes"],
-  ["renderer", "Renderer", "reframe, captions, export"],
+  ["voices", "Speakers", "streamer / game dialogue / other"],
+  ["chat", "Live chat", "rate + what chat feels"],
+  ["hype", "Hype detector", "loudness + chat reactions"],
+  ["claude", "Picker", "spike checks + passes"],
+  ["gate", "Quality gate", "evidence → frames → score"],
+  ["renderer", "Renderer", "reframe, captions, thumbnail"],
   ["uploader", "YouTube", "uploads each clip as it's made"],
 ];
+const OUTCOME = {
+  made: ["var(--s3)", "Made"], waiting: ["var(--warning)", "Waiting"], checking: ["var(--s1)", "Checking"],
+  dropped: ["var(--axis)", "Dropped"],
+};
+// evidence chips: short labels for the gate's "why" strings
+function evLabel(w) {
+  if (/loudest moments/.test(w)) return "🏆 loudest of the stream";
+  if (/^loud peak/.test(w)) return `🔊 ${w}`;
+  if (/sustained/.test(w)) return `⏱ ${w}`;
+  if (/chat reaction/.test(w)) return `💬 ${w.replace("chat reaction burst", "chat burst")}`;
+  if (/clip it/.test(w)) return "✂ chat said clip it";
+  if (/viewers clipped/.test(w)) return "🎬 viewers clipped it";
+  if (/quoting/.test(w)) return `❝ ${w.replace("chat is quoting it", "chat quotes it")}`;
+  if (/on screen/.test(w)) return `🖥 ${w}`;
+  return w;
+}
 
 function pickLive(st) {
   const sel = st.jobs.find((j) => j.id === SELECTED && j.kind === "live");
@@ -324,11 +372,12 @@ function renderLive(st) {
       stat(fmtTs(job.stream_time || 0), "stream recorded"),
       stat(String(job.clips || 0), "clips made"),
       stat(buf.seconds != null ? `${Math.round(buf.seconds / 60)} min` : "–", `buffer${buf.bytes ? ` · ${gb(buf.bytes)}` : ""}`),
-      stat(isLive && job.next_review != null ? fmtTs(job.next_review) : "–", "next Claude pass"),
-      stat(job.pending ? String(job.pending) : "0", "spikes waiting"),
-      stat(usage.requests ? `${fmtK((usage.input_tokens || 0) + (usage.output_tokens || 0))}` : "0", `Claude tokens${usage.cost_usd ? ` · ≈ $${usage.cost_usd.toFixed(2)}` : ""}`)));
+      stat(isLive && job.next_review != null ? fmtTs(job.next_review) : "–", "next picker pass"),
+      stat(candStat(tel), "candidates made / checked"),
+      stat(job.pending ? String(job.pending) : "0", "waiting"),
+      stat(usage.requests ? `${fmtK((usage.input_tokens || 0) + (usage.output_tokens || 0))}` : "0", `picker tokens${usage.cost_usd ? ` · ≈ $${usage.cost_usd.toFixed(2)}` : ""}`)));
 
-  const stages = STAGES.filter(([key]) => key !== "uploader" || act.uploader);  // YouTube only when uploading
+  const stages = STAGES.filter(([key]) => (key !== "uploader" || act.uploader) && (key !== "voices" || act.voices));
   const flow = h("div", { class: "flow", style: `--n:${stages.length}` }, ...stages.map(([key, name, hint], i) => {
     const a = act[key];
     const fresh = isLive && a && st.now - a.t < 45;  // segments land every ~30 s
@@ -343,18 +392,95 @@ function renderLive(st) {
   const parts = [head, flow, chartBox];
   if (tel) {
     renderChart(chartBox, tel, job);
+    parts.push(candidates(tel, st, isLive));
     const lines = (tel.transcript || []).slice(-14).reverse();
+    const v = tel.voices || {};
     const transcript = h("div", { class: "card transcript", style: "padding:12px 14px" },
-      h("div", { class: "box-title" }, "Latest transcript"),
-      lines.length ? lines.map((l) => h("p", {}, h("span", { class: "tm" }, fmtTs(l.t)), l.text)) :
+      h("div", { class: "row", style: "margin-bottom:8px" }, h("span", { class: "box-title", style: "margin:0" }, "Latest transcript"),
+        h("span", { class: "spacer" }),
+        v.game || v.other ? h("span", { class: "muted", style: "font-size:12px" },
+          `🎮 ${v.game || 0} game-dialogue lines (no captions) · 👥 ${v.other || 0} other voice`) : null),
+      lines.length ? lines.map((l) => h("p", { class: l.who === "game" ? "game" : "" }, h("span", { class: "tm" }, fmtTs(l.t)),
+        l.who === "game" ? h("span", { class: "who", title: "game dialogue: not captioned" }, "🎮") :
+          l.who === "other" ? h("span", { class: "who", title: "another person" }, "👥") : null, l.text)) :
         h("div", { class: "muted" }, "Nothing said yet."));
     parts.push(h("div", { class: "grid2", style: "margin-top:12px" }, transcript, feed(job)));
+    if (tel.demand) parts.push(audience(tel.demand));
   } else {
     parts.push(h("div", { class: "empty" }, "Waiting for the first segment…"), feed(job));
   }
   box.replaceChildren(...parts);
 }
 const stat = (v, k) => h("div", { class: "stat" }, h("div", { class: "v" }, v), h("div", { class: "k" }, k));
+
+function candStat(tel) {
+  const c = (tel && tel.candidates) || [];
+  return c.length ? `${c.filter((x) => x.outcome === "made").length} / ${c.length}` : "0";
+}
+
+// ---------- quality gate: every candidate and what happened to it ----------
+function candidates(tel, st, isLive) {
+  const list = (tel.candidates || []).slice().reverse();
+  const card = h("div", { class: "card", style: "margin-top:12px;padding:12px 14px" },
+    h("div", { class: "row" }, h("span", { class: "box-title", style: "margin:0" }, "Candidates"),
+      h("span", { class: "muted", style: "font-size:12px" },
+        `every moment the picker suggested, and the quality gate's verdict · bar ${tel.min_score || 70}`)));
+  if (!list.length) {
+    card.appendChild(h("div", { class: "muted", style: "padding:10px 0 2px;font-size:12.5px" },
+      "No candidates yet. The picker only suggests moments where something happens; quiet stretches give none."));
+    return card;
+  }
+  const bar = tel.min_score || 70;
+  card.appendChild(h("div", { class: "cands" }, list.slice(0, 20).map((c) => {
+    const [color, label] = OUTCOME[c.outcome] || OUTCOME.checking;
+    let note = null;
+    if (c.outcome === "dropped") note = `✗ ${c.why || ""}`;
+    else if (c.outcome === "waiting") note = `⏳ compared with the next picks; decides in ${fmtTs(Math.max(0, (c.decide_at || st.now) - st.now))}`;
+    else if (c.outcome === "made") note = c.frames ? `🎞 ${c.frames}` : `✂ ${c.name || "made"}`;
+    else note = "checking evidence and frames…";
+    const score = c.combined != null ? c.combined : null;
+    return h("div", { class: `cand ${c.outcome}` },
+      h("div", {}, h("div", { class: "when" }, fmtTs(c.start)), h("div", { class: "src" }, c.src || ""),
+        h("div", { class: "src" }, `${Math.round(c.end - c.start)}s`)),
+      h("div", {},
+        h("div", { class: "ttl" }, c.title || "(untitled)"),
+        (c.evidence || []).length ? h("div", { class: "evs" }, c.evidence.map((w) => h("span", { class: "ev", title: w }, evLabel(w)))) :
+          (c.signal != null ? h("div", { class: "evs" }, h("span", { class: "ev" }, "no measurable evidence")) : null),
+        h("div", { class: "note" }, note),
+        c.outcome !== "made" && c.frames && c.outcome === "waiting" ? h("div", { class: "note" }, `🎞 ${c.frames}`) : null),
+      h("div", { class: "score" },
+        h("div", { class: "big" }, score != null ? String(score) : "–"),
+        h("div", { class: "small" }, `picker ${c.picker_after != null ? c.picker_after : c.picker || "–"}${c.signal != null ? ` · signals ${c.signal}` : ""}`),
+        score != null ? h("div", { class: "bar-mini", title: `score ${score} vs bar ${bar}` },
+          h("div", { style: `width:${Math.min(100, score)}%;background:${score >= bar ? "var(--s3)" : "var(--axis)"}` }),
+          h("b", { style: `left:${bar}%` })) : null,
+        h("div", { class: "out", style: `color:${c.outcome === "dropped" ? "var(--muted)" : "var(--text)"}` }, h("i", { style: `background:${color}` }), label)));
+  })));
+  return card;
+}
+
+// ---------- what the audience is looking for (demand.py) ----------
+function audience(text) {
+  const card = h("div", { class: "card", style: "margin-top:12px;padding:12px 14px" },
+    h("div", { class: "row" }, h("span", { class: "box-title", style: "margin:0" }, "What viewers want"),
+      h("span", { class: "muted", style: "font-size:12px" }, "YouTube searches and top videos about this streamer · the picker sees this")));
+  for (const line of text.split("\n")) {
+    const i = line.indexOf(": ");
+    if (i < 0 || line.startsWith("Use these")) continue;
+    const label = line.slice(0, i), items = line.slice(i + 2).split("; ").filter(Boolean);
+    if (/searching/.test(label)) {
+      card.append(h("div", { class: "sub" }, "Searched on YouTube right now"),
+        h("div", { class: "qs" }, items.map((q) => h("span", { class: "q" }, q))));
+    } else {
+      card.append(h("div", { class: "sub" }, label.replace(/ \(what already gets views\)/, "")),
+        h("ul", { class: "tops" }, items.map((it) => {
+          const m = it.match(/^"(.*)" \(([^)]*)\)$/);
+          return h("li", {}, h("span", { class: "v" }, m ? m[2] : ""), h("span", {}, m ? m[1] : it));
+        })));
+    }
+  }
+  return card;
+}
 
 function feed(job) {
   const ev = (job.events || []).slice(-60).reverse();
@@ -380,7 +506,8 @@ function renderChart(box, tel, job) {
       h("span", {}, h("i", { class: "key-line", style: "background:var(--muted);height:0;border-top:1px dashed var(--muted)" }), "Spike threshold"),
       h("span", {}, "▼ spike"),
       h("span", {}, h("i", { class: "key-box", style: "background:var(--s3)" }), "Clip"),
-      h("span", {}, h("i", { class: "key-box", style: "background:var(--band);outline:1px solid var(--axis)" }), "Claude pass")));
+      h("span", {}, h("i", { class: "key-box", style: "background:transparent;outline:1px dashed var(--text-2)" }), "Candidate (dropped / waiting)"),
+      h("span", {}, h("i", { class: "key-box", style: "background:var(--band);outline:1px solid var(--axis)" }), "Picker pass")));
   const wrap = h("div", { class: "chart" });
   const tip = h("div", { class: "tip" });
   box.replaceChildren(head, wrap, dataTable(tel));
@@ -434,7 +561,7 @@ function renderChart(box, tel, job) {
       fill: filled ? "var(--text-2)" : "var(--surface)", stroke: "var(--text-2)", "stroke-width": 1.5 }));
   }
   // lanes
-  const lanes = [["Clips", laneTop], ["Claude", laneTop + LANE + LG]];
+  const lanes = [["Clips", laneTop], ["Picker", laneTop + LANE + LG]];
   for (const [label, ly] of lanes) {
     svg.appendChild(s("rect", { x: M.l, y: ly, width: W - M.l - M.r, height: LANE, rx: 4, fill: "var(--band)", opacity: 0.5 }));
     svg.appendChild(s("text", { x: W - M.r + 6, y: ly + LANE / 2 + 4, class: "lane-label" }, label));
@@ -445,6 +572,12 @@ function renderChart(box, tel, job) {
     const w = Math.max(3, x(b) - x(a));
     svg.appendChild(s("rect", { x: x(a), y: laneTop + 3, width: w, height: LANE - 6, rx: 3, fill: "var(--s3)" }));
     if (w > 46) svg.appendChild(s("text", { x: x(a) + 5, y: laneTop + LANE / 2 + 4, style: "fill:var(--on-fill);font-weight:600" }, c.name.replace("clip_", "#")));
+  }
+  for (const c of (tel.candidates || [])) {
+    if (c.outcome === "made") continue;  // made ones are the green clips
+    const [a, b] = clamp(c.start, c.end); if (b <= a) continue;
+    svg.appendChild(s("rect", { x: x(a) + 0.5, y: laneTop + 3.5, width: Math.max(3, x(b) - x(a) - 1), height: LANE - 7, rx: 3,
+      fill: "none", stroke: c.outcome === "waiting" ? "var(--warning)" : "var(--text-2)", "stroke-dasharray": "3 3", "stroke-width": 1 }));
   }
   for (const r of (tel.reviews || [])) {
     const [a, b] = clamp(r.a, r.b); if (b <= a) continue;
@@ -468,11 +601,16 @@ function renderChart(box, tel, job) {
       h("div", { class: "tr" }, h("i", { class: "key-line", style: "background:var(--s1)" }), h("b", {}, loud[i].toFixed(1)), "Loudness")];
     if (chat && chat[i] != null) rows.push(h("div", { class: "tr" }, h("i", { class: "key-line", style: "background:var(--s2)" }), h("b", {}, chat[i].toFixed(1)), "Chat rate"));
     const sp = spikes.find((q) => Math.abs(q.t - t) <= 4);
-    if (sp) rows.push(h("div", { class: "tr" }, "▼", h("b", {}, sp.score.toFixed(1)), `spike · ${sp.outcome}`));
+    if (sp) rows.push(h("div", { class: "tr" }, "▼", h("b", {}, sp.score.toFixed(1)), `${sp.src || "spike"} · ${sp.outcome}`));
     const c = (tel.clips || []).find((q) => t >= q.start && t <= q.end);
     if (c) rows.push(h("div", { class: "tr" }, h("i", { class: "key-box", style: "background:var(--s3)" }), c.name, c.title ? ` · ${c.title}` : ""));
+    const cd = (tel.candidates || []).find((q) => q.outcome !== "made" && t >= q.start && t <= q.end);
+    if (cd) rows.push(h("div", { class: "tr" }, h("i", { class: "key-box", style: "outline:1px dashed var(--text-2)" }),
+      `${(OUTCOME[cd.outcome] || OUTCOME.checking)[1]}: ${(cd.title || "").slice(0, 50)}${cd.why ? ` (${cd.why.slice(0, 60)})` : ""}`));
+    const evn = (tel.events || []).find((q) => Math.abs(q.t - t) <= 3);
+    if (evn) rows.push(h("div", { class: "tr" }, "🖥", `on screen: ${evn.text}`));
     const said = tr.find((q) => t >= q.t - 0.5 && t <= q.e + 0.5);
-    if (said) rows.push(h("div", { class: "say" }, `"${said.text.slice(0, 140)}"`));
+    if (said) rows.push(h("div", { class: "say" }, `${said.who === "game" ? "🎮 game: " : said.who === "other" ? "👥 " : ""}"${said.text.slice(0, 140)}"`));
     tip.replaceChildren(...rows);
     tip.style.display = "block";
     const left = (ev.clientX - r.left);
@@ -487,9 +625,11 @@ function renderChart(box, tel, job) {
 
 function dataTable(tel) {
   const rows = [];
-  for (const sp of tel.spikes || []) rows.push([sp.t, "Spike", `score ${sp.score}`, sp.outcome]);
+  for (const sp of tel.spikes || []) rows.push([sp.t, sp.src === "viewer clip" ? "Viewer clip" : "Spike", `score ${sp.score}`, sp.outcome]);
   for (const c of tel.clips || []) rows.push([c.start, "Clip", `${c.name} (${Math.round(c.end - c.start)}s)`, c.title || ""]);
-  for (const r of tel.reviews || []) rows.push([r.a, "Claude pass", `${fmtTs(r.a)}–${fmtTs(r.b)}`, r.result]);
+  for (const r of tel.reviews || []) rows.push([r.a, "Picker pass", `${fmtTs(r.a)}–${fmtTs(r.b)}`, r.result]);
+  for (const c of tel.candidates || []) rows.push([c.start, "Candidate", `${(c.title || "").slice(0, 60)} (score ${c.combined ?? "–"})`,
+    c.outcome === "dropped" ? `dropped: ${c.why || ""}` : c.outcome]);
   rows.sort((a, b) => b[0] - a[0]);
   return h("details", {}, h("summary", {}, `Data table (${rows.length} events)`),
     h("table", { class: "dtable" }, h("thead", {}, h("tr", {}, h("th", {}, "Stream time"), h("th", {}, "Type"), h("th", {}, "What"), h("th", {}, "Result"))),
@@ -560,10 +700,13 @@ function renderClips(st) {
       setTimeout(() => (btn.textContent = "Copy caption"), 1500);
     });
     return h("div", { class: "clip" },
-      h("video", { src: `/media/${encodeURI(c.src)}#t=0.5`, controls: "", preload: "metadata", playsinline: "" }),
+      h("video", { src: `/media/${encodeURI(c.src)}${c.thumb ? "" : "#t=0.5"}`, poster: c.thumb ? `/media/${encodeURI(c.thumb)}` : null,
+        controls: "", preload: "metadata", playsinline: "" }),
       h("div", { class: "body" },
         h("div", { class: "ct", title: c.title }, c.title || c.name),
-        h("div", { class: "meta" }, [c.score != null ? `score ${Math.round(c.score)}` : null, c.by, c.layout, `${Math.round(c.duration)}s`].filter(Boolean).join(" · ")),
+        h("div", { class: "meta" }, [c.combined != null ? `score ${c.combined}` : c.score != null ? `score ${Math.round(c.score)}` : null, c.by, c.layout, `${Math.round(c.duration)}s`].filter(Boolean).join(" · ")),
+        (c.evidence || []).length ? h("div", { class: "evs" }, c.evidence.slice(0, 3).map((w) => h("span", { class: "ev", title: w }, evLabel(w)))) : null,
+        c.frames ? h("div", { class: "meta", title: c.frames, style: "display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden" }, `🎞 ${c.frames}`) : null,
         h("div", { class: "meta", title: c.source_title }, `${c.source_title.slice(0, 60)} · ${new Date(c.made * 1000).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}`),
         ytBadge(c.yt),
         btn));
